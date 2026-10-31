@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-debug-apk:
     runs-on: ubuntu-24.04
@@ -44,10 +47,25 @@ jobs:
           chmod +x ./gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: Upload APK
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk finance-dashboard.apk
+
+      - name: Upload APK as workflow artifact (backup)
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: finance-dashboard.apk
           if-no-files-found: error
           retention-days: 30
+
+      # Fixed tag "latest" => stable link:
+      # https://github.com/<owner>/<repo>/releases/download/latest/finance-dashboard.apk
+      - name: Publish to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest finance-dashboard.apk \
+            --target "$GITHUB_SHA" \
+            --title "Android APK (debug) - build #${{ github.run_number }}" \
+            --notes "Debug APK built from commit $GITHUB_SHA. Installs the My Life OS shell that loads the live site."
