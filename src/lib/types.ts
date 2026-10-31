@@ -107,6 +107,8 @@ export interface Project {
   notes: string | null;
   is_archived: boolean;
   created_at: string;
+  /** Event / goal date. Present only after SQL 0007. */
+  target_date?: string | null;
 }
 
 export interface ProjectCashflow {
@@ -119,4 +121,6 @@ export interface ProjectCashflow {
   due_date: string | null; // YYYY-MM-DD
   is_done: boolean;
   debt_id: string | null;
+  /** Amount already paid / received (partial payments). Present only after SQL 0007. */
+  paid_amount?: number;
 }

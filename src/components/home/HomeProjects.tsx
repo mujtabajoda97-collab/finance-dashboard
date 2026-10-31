@@ -5,6 +5,7 @@ import { useApp } from '../Providers';
 import { useData } from '@/lib/data';
 import { formatMoney } from '@/lib/currency';
 import { summarize } from '@/lib/projects';
+import { todayDubai } from '@/lib/derived';
 import { px as tx, type AnyKey } from '@/lib/ptext';
 
 /** Summary card for the home page. Hidden until the projects tables exist and at least one project is saved. */
@@ -26,7 +27,7 @@ export function HomeProjects() {
       ) : (
         <ul className="space-y-3">
           {top.map((p) => {
-            const s = summarize(p, cashflows, rates);
+            const s = summarize(p, cashflows, rates, todayDubai());
             return (
               <li key={p.id}>
                 <div className="flex items-baseline justify-between gap-2">
@@ -36,10 +37,13 @@ export function HomeProjects() {
                   </p>
                 </div>
                 <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-paper dark:bg-night">
-                  <div className="h-full rounded-full bg-brand-500" style={{ width: `${s.pct}%` }} />
+                  <div className="flex h-full" style={{ width: `${s.pct}%` }}>
+                    <div className="h-full bg-emerald-600" style={{ width: s.pct > 0 ? `${(s.spentPct / s.pct) * 100}%` : '0%' }} />
+                    <div className="h-full flex-1 bg-brand-500" />
+                  </div>
                 </div>
                 <p className="num mt-0.5 text-[11px] text-muted dark:text-night-muted">
-                  {formatMoney(p.allocated_amount, p.currency, lang, 0)} {T('progressOf')} {formatMoney(p.budget, p.currency, lang, 0)}
+                  {formatMoney(s.spent + s.allocated, p.currency, lang, 0)} {T('progressOf')} {formatMoney(s.totalCost, p.currency, lang, 0)}
                 </p>
               </li>
             );

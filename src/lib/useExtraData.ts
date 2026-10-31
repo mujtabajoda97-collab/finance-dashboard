@@ -14,6 +14,8 @@ export function useExtraData(enabled: boolean) {
   const [cashflows, setCashflows] = useState<ProjectCashflow[]>([]);
   /** false when the projects tables do not exist yet (SQL 0005 not applied). */
   const [projectsReady, setProjectsReady] = useState(true);
+  /** true once SQL 0007 (target_date, paid_amount, project_receive) is applied. */
+  const [projectsV2, setProjectsV2] = useState(false);
   const [extraError, setExtraError] = useState<string | null>(null);
 
   const loadDebts = useCallback(async () => {
@@ -34,12 +36,22 @@ export function useExtraData(enabled: boolean) {
   }, []);
 
   const loadProjects = useCallback(async () => {
-    const [p, c] = await Promise.all([
-      supabase().from('projects').select('id,name,budget,currency,allocated_amount,notes,is_archived,created_at')
-        .eq('is_archived', false).order('created_at', { ascending: false }).limit(200),
-      supabase().from('project_cashflows').select('id,project_id,direction,title,amount,currency,due_date,is_done,debt_id')
-        .order('due_date', { ascending: true, nullsFirst: false }).limit(2000),
-    ]);
+    const pBase = 'id,name,budget,currency,allocated_amount,notes,is_archived,created_at';
+    const cBase = 'id,project_id,direction,title,amount,currency,due_date,is_done,debt_id';
+    const run = (v2: boolean) =>
+      Promise.all([
+        supabase().from('projects').select(v2 ? `${pBase},target_date` : pBase)
+          .eq('is_archived', false).order('created_at', { ascending: false }).limit(200),
+        supabase().from('project_cashflows').select(v2 ? `${cBase},paid_amount` : cBase)
+          .order('due_date', { ascending: true, nullsFirst: false }).limit(2000),
+      ]);
+    let v2 = true;
+    let [p, c] = await run(true);
+    // New columns missing until SQL 0007 is applied: fall back to the basic columns.
+    if (p.error || c.error) {
+      v2 = false;
+      [p, c] = await run(false);
+    }
     if (p.error || c.error) {
       setProjectsReady(false);
       setProjects([]);
@@ -47,8 +59,11 @@ export function useExtraData(enabled: boolean) {
       return; // fail-soft: the rest of the app keeps working
     }
     setProjectsReady(true);
-    setProjects((p.data ?? []).map((r) => ({ ...r, budget: Number(r.budget), allocated_amount: Number(r.allocated_amount) })) as Project[]);
-    setCashflows((c.data ?? []).map((r) => ({ ...r, amount: Number(r.amount) })) as ProjectCashflow[]);
+    setProjectsV2(v2);
+    const pr = (p.data ?? []) as unknown as Record<string, unknown>[];
+    const cr = (c.data ?? []) as unknown as Record<string, unknown>[];
+    setProjects(pr.map((r) => ({ ...r, budget: Number(r.budget), allocated_amount: Number(r.allocated_amount) })) as unknown as Project[]);
+    setCashflows(cr.map((r) => ({ ...r, amount: Number(r.amount), ...(v2 ? { paid_amount: Number(r.paid_amount ?? 0) } : {}) })) as unknown as ProjectCashflow[]);
   }, []);
 
   const loadAlerts = useCallback(async () => {
@@ -94,5 +109,5 @@ export function useExtraData(enabled: boolean) {
     if (enabled) loadExtra();
   }, [enabled, loadExtra]);
 
-  return { debts, alerts, profile, rateHistory, projects, cashflows, projectsReady, loadProjects, extraError, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadExtra };
+  return { debts, alerts, profile, rateHistory, projects, cashflows, projectsReady, projectsV2, loadProjects, extraError, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadExtra };
 }

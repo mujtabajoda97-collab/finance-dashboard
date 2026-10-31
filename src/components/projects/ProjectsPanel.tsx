@@ -6,22 +6,27 @@ import { useApp } from '../Providers';
 import { useData } from '@/lib/data';
 import { supabase } from '@/lib/supabase';
 import { formatMoney } from '@/lib/currency';
-import { summarize } from '@/lib/projects';
+import { todayDubai } from '@/lib/derived';
+import { flowPaid, flowRest, summarize } from '@/lib/projects';
 import { px as tx, type AnyKey } from '@/lib/ptext';
 import type { Project, ProjectCashflow } from '@/lib/types';
-import { FlowSheet, ProjectSheet } from './ProjectForms';
+import { FlowSheet, PaySheet, ProjectSheet } from './ProjectForms';
 
 type K = AnyKey;
 
 export function ProjectsPanel() {
   const { lang, notify } = useApp();
-  const { projects, cashflows, projectsReady, rates, loadProjects } = useData();
+  const { projects, cashflows, projectsReady, projectsV2, rates, loadProjects } = useData();
   const T = (k: K) => tx(lang, k);
+  const today = todayDubai();
   const [sheet, setSheet] = useState<Project | null | undefined>(undefined);
   const [flow, setFlow] = useState<{ p: Project; dir: 'IN' | 'OUT' } | null>(null);
+  const [pay, setPay] = useState<{ p: Project; f: ProjectCashflow } | null>(null);
 
-  async function toggle(f: ProjectCashflow) {
-    const { error } = await supabase().from('project_cashflows').update({ is_done: !f.is_done }).eq('id', f.id);
+  /** Legacy toggle (before SQL 0007) and "undo" for spending after it. */
+  async function setDone(f: ProjectCashflow, done: boolean) {
+    const row = projectsV2 ? { is_done: done, paid_amount: done ? f.amount : 0 } : { is_done: done };
+    const { error } = await supabase().from('project_cashflows').update(row).eq('id', f.id);
     if (error) return notify(error.message, 'error');
     await loadProjects();
   }
@@ -47,8 +52,10 @@ export function ProjectsPanel() {
       {projects.length === 0 && <div className="card py-8 text-center text-sm text-muted dark:text-night-muted">{T('noProjects')}</div>}
 
       {projects.map((p) => {
-        const s = summarize(p, cashflows, rates);
+        const s = summarize(p, cashflows, rates, today);
+        const m = (n: number) => formatMoney(n, p.currency, lang);
         const flows = cashflows.filter((f) => f.project_id === p.id);
+        const ok = s.net >= 0;
         const lists: { dir: 'OUT' | 'IN'; label: K; add: K }[] = [
           { dir: 'OUT', label: 'outflows', add: 'addOutflow' },
           { dir: 'IN', label: 'inflows', add: 'addInflow' },
@@ -59,7 +66,7 @@ export function ProjectsPanel() {
               <div className="min-w-0">
                 <h3 className="truncate text-base font-bold">{p.name}</h3>
                 <p className="num text-xs text-muted dark:text-night-muted">
-                  {formatMoney(p.allocated_amount, p.currency, lang)} {T('progressOf')} {formatMoney(p.budget, p.currency, lang)}
+                  {m(s.spent + s.allocated)} {T('progressOf')} {m(s.totalCost)}
                 </p>
               </div>
               <button type="button" aria-label={T('editProject')} className="btn border border-line p-2 dark:border-night-line" onClick={() => setSheet(p)}>
@@ -69,18 +76,37 @@ export function ProjectsPanel() {
 
             <div role="progressbar" aria-valuenow={Math.round(s.pct)} aria-valuemin={0} aria-valuemax={100}
               className="h-2.5 w-full overflow-hidden rounded-full bg-paper dark:bg-night">
-              <div className="h-full rounded-full bg-brand-500" style={{ width: `${s.pct}%` }} />
+              <div className="flex h-full" style={{ width: `${s.pct}%` }}>
+                <div className="h-full bg-emerald-600" style={{ width: s.pct > 0 ? `${(s.spentPct / s.pct) * 100}%` : '0%' }} />
+                <div className="h-full flex-1 bg-brand-500" />
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className={`rounded-xl px-3 py-2 ${s.net >= 0 ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300' : 'bg-rose-500/10 text-rose-800 dark:text-rose-300'}`}>
-                <p className="text-[11px]">{s.net >= 0 ? T('surplus') : T('deficit')}</p>
-                <p className="num font-mono font-bold" dir="ltr">{formatMoney(Math.abs(s.net), p.currency, lang)}</p>
-              </div>
-              <div className="rounded-xl bg-paper px-3 py-2 dark:bg-night">
-                <p className="text-[11px] text-muted dark:text-night-muted">{T('stillNeeded')}</p>
-                <p className="num font-mono font-bold" dir="ltr">{formatMoney(s.needed, p.currency, lang)}</p>
-              </div>
+              {([
+                ['spentLabel', s.spent], ['remainingCost', s.remainingCost],
+                ['fundsNow', s.allocated], ['pendingIn', s.pendingIn],
+              ] as [K, number][]).map(([k, v]) => (
+                <div key={k} className="rounded-xl bg-paper px-3 py-2 dark:bg-night">
+                  <p className="text-[11px] text-muted dark:text-night-muted">{T(k)}</p>
+                  <p className="num font-mono font-bold" dir="ltr">{m(v)}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Coverage indicator: do the expected inflows cover what is left before the date? */}
+            <div className={`space-y-1 rounded-xl px-3 py-2 text-sm ${ok ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300' : 'bg-rose-500/10 text-rose-800 dark:text-rose-300'}`}>
+              <p className="font-semibold">{ok ? T('coverOk') : T('coverShort')}</p>
+              <p className="num text-xs" dir="ltr">
+                {m(s.allocated)} + {m(s.inBefore)} ({T('beforeDate')}) {ok ? '≥' : '<'} {m(s.remainingCost)}
+              </p>
+              <p className="num font-mono font-bold" dir="ltr">{ok ? T('leftOver') : T('shortBy')} {m(Math.abs(s.net))}</p>
+              {s.inAfter > 0 && <p className="num text-xs">{T('afterDate')}: {m(s.inAfter)}</p>}
+              {s.hasDate && s.daysLeft !== null && (
+                <p className="num text-xs">{p.target_date} · {s.daysLeft >= 0 ? `${s.daysLeft} ${T('daysLeft')}` : T('datePassed')}</p>
+              )}
+              {!s.hasDate && projectsV2 && <p className="text-xs">{T('noTargetNote')}</p>}
+              {s.needed > 0 && <p className="num text-xs">{T('stillNeeded')}: {m(s.needed)}</p>}
             </div>
             {s.partial && <p className="text-[11px] text-amber-700 dark:text-amber-300">{T('noRateNote')}</p>}
 
@@ -97,22 +123,44 @@ export function ProjectsPanel() {
                       + {T(add)}
                     </button>
                   </div>
-                  {items.map((f) => (
-                    <div key={f.id} className={`flex items-center gap-2 rounded-xl border border-line px-3 py-2 dark:border-night-line ${f.is_done ? 'opacity-60' : ''}`}>
-                      <button type="button" aria-label={T('markDone')} aria-pressed={f.is_done} onClick={() => toggle(f)}
-                        className={`grid size-6 shrink-0 place-items-center rounded-full border ${f.is_done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-line dark:border-night-line'}`}>
-                        {f.is_done && <Check className="size-3.5" aria-hidden />}
-                      </button>
-                      <div className="min-w-0 flex-1">
-                        <p className={`truncate text-sm font-medium ${f.is_done ? 'line-through' : ''}`}>{f.title}</p>
-                        <p className="num text-[11px] text-muted dark:text-night-muted">{f.due_date ?? ''}</p>
+                  {items.map((f) => {
+                    const paid = flowPaid(f);
+                    const rest = flowRest(f);
+                    const done = rest <= 0;
+                    const late = !done && !!f.due_date && f.due_date < today;
+                    return (
+                      <div key={f.id} className={`flex items-center gap-2 rounded-xl border border-line px-3 py-2 dark:border-night-line ${done ? 'opacity-70' : ''}`}>
+                        {projectsV2 && !done ? (
+                          <button type="button" aria-label={dir === 'IN' ? T('payIn') : T('payOut')} onClick={() => setPay({ p, f })}
+                            className="grid size-6 shrink-0 place-items-center rounded-full border border-brand-500 text-brand-700 dark:text-brand-400">
+                            <Plus className="size-3.5" aria-hidden />
+                          </button>
+                        ) : (
+                          <button type="button" aria-label={done && dir === 'OUT' ? T('undo') : T('markDone')} aria-pressed={done}
+                            disabled={projectsV2 && done && dir === 'IN'}
+                            onClick={() => setDone(f, !done)}
+                            className={`grid size-6 shrink-0 place-items-center rounded-full border ${done ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-line dark:border-night-line'}`}>
+                            {done && <Check className="size-3.5" aria-hidden />}
+                          </button>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className={`truncate text-sm font-medium ${done ? 'line-through' : ''}`}>{f.title}</p>
+                          <p className="num text-[11px] text-muted dark:text-night-muted">
+                            {f.due_date ?? ''}
+                            {late && <span className="ms-1 font-semibold text-rose-600"> · {T('overdue')}</span>}
+                            {!done && paid > 0 && ` · ${T('paidWord')} ${formatMoney(paid, f.currency, lang)}`}
+                          </p>
+                        </div>
+                        <span className="num text-end font-mono text-sm" dir="ltr">
+                          {formatMoney(done ? f.amount : rest, f.currency, lang)}
+                          {!done && paid > 0 && <span className="block text-[10px] text-muted dark:text-night-muted">/ {formatMoney(f.amount, f.currency, lang)}</span>}
+                        </span>
+                        <button type="button" aria-label={T('deleteProject')} className="p-1 text-muted dark:text-night-muted" onClick={() => del(f)}>
+                          <Trash2 className="size-4" aria-hidden />
+                        </button>
                       </div>
-                      <span className="num font-mono text-sm" dir="ltr">{formatMoney(f.amount, f.currency, lang)}</span>
-                      <button type="button" aria-label={T('deleteProject')} className="p-1 text-muted dark:text-night-muted" onClick={() => del(f)}>
-                        <Trash2 className="size-4" aria-hidden />
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               );
             })}
@@ -122,6 +170,7 @@ export function ProjectsPanel() {
 
       {sheet !== undefined && <ProjectSheet project={sheet} onClose={() => setSheet(undefined)} />}
       {flow && <FlowSheet project={flow.p} direction={flow.dir} onClose={() => setFlow(null)} />}
+      {pay && <PaySheet project={pay.p} flow={pay.f} onClose={() => setPay(null)} />}
     </section>
   );
 }
