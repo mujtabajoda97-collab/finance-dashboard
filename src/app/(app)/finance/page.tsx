@@ -56,7 +56,7 @@ export default function FinancePage() {
       ) : (
         <div className="mt-2 grid w-full max-w-full grid-cols-1 gap-4 overflow-hidden lg:grid-cols-5">
           <div className="w-full min-w-0 max-w-full space-y-4 lg:col-span-3">
-            <BalanceCards wallets={data.wallets} rates={data.rates} onAdd={() => setWalletSheet(null)} onEdit={(w) => setWalletSheet(w)} />
+            <BalanceCards wallets={data.wallets} rates={data.rates} reserved={data.reserved} onAdd={() => setWalletSheet(null)} onEdit={(w) => setWalletSheet(w)} />
             <MonthSummary txns={data.monthTxns} wallets={data.wallets} rates={data.rates} truncated={data.monthTruncated} />
             <RecentTransactions txns={data.recentTxns} wallets={data.wallets} limit={20} />
           </div>

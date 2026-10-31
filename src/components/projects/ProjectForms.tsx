@@ -9,6 +9,7 @@ import { supabase } from '@/lib/supabase';
 import { convert, parseAmount, round2, formatMoney } from '@/lib/currency';
 import { remaining } from '@/lib/debt';
 import { flowRest } from '@/lib/projects';
+import { freeBalance, reservedFor, spendableForProject } from '@/lib/reserve';
 import { isOpenDebt } from '@/lib/derived';
 import { px as tx, type AnyKey } from '@/lib/ptext';
 import { CURRENCIES, type Currency, type Project, type ProjectCashflow } from '@/lib/types';
@@ -128,7 +129,7 @@ export function FlowSheet({ project, direction, onClose }: { project: Project; d
   }
 
   return (
-    <Sheet title={`${project.name} · ${direction === 'IN' ? T('addInflow') : T('addOutflow')}`} onClose={onClose}>
+    <Sheet title={`${project.name} · ${direction === 'IN' ? T('addInflow') : T('addBudgetItem')}`} onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
         {linkable.length > 0 && (
           <label className="block"><span className="label">{T('linkDebt')}</span>
@@ -139,10 +140,10 @@ export function FlowSheet({ project, direction, onClose }: { project: Project; d
               ))}
             </select></label>
         )}
-        <label className="block"><span className="label">{T('itemTitle')}</span>
+        <label className="block"><span className="label">{direction === 'IN' ? T('itemTitle') : T('itemDesc')}</span>
           <input autoFocus className="field" placeholder={direction === 'IN' ? T('sourcePlaceholder') : ''} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
         <div className="grid grid-cols-3 gap-3">
-          <label className="col-span-2"><span className="label">{T('amount')}</span>
+          <label className="col-span-2"><span className="label">{direction === 'IN' ? T('amount') : T('estAmount')}</span>
             <input className="field num font-mono" inputMode="decimal" dir="ltr" value={raw} onChange={(e) => setRaw(e.target.value)} /></label>
           <label><span className="label">{T('currency')}</span>
             <select className="field px-2" value={currency} onChange={(e) => setCurrency(e.target.value as Currency)}>
@@ -159,36 +160,58 @@ export function FlowSheet({ project, direction, onClose }: { project: Project; d
   );
 }
 
-/** Record a partial or full payment on a cash-flow item. Receipts also top up the project's set-aside amount. */
+/**
+ * Record a partial or full payment on a cash-flow item.
+ *  - expense item: optionally paid from a wallet (real expense; the project's reserved money is released)
+ *  - expected payment linked to a collected debt: received into a wallet and reserved for the project
+ *  - other expected payments: recorded and added to the project's set-aside amount
+ */
 export function PaySheet({ project, flow, onClose }: { project: Project; flow: ProjectCashflow; onClose: () => void }) {
   const { lang, notify } = useApp();
-  const { loadProjects, rates } = useData();
+  const { loadProjects, loadDebts, loadReservations, loadWallets, rates, wallets, debts, reservations, reserved, reservationsReady } = useData();
   const T = (k: K) => tx(lang, k);
   const rest = flowRest(flow);
-  const [raw, setRaw] = useState(String(rest));
+  const isIn = flow.direction === 'IN';
+  const debt = isIn && flow.debt_id ? debts.find((d) => d.id === flow.debt_id && d.type === 'RECEIVABLE' && isOpenDebt(d)) : undefined;
+  const walletMode = reservationsReady && (!isIn || !!debt);
+  const eligible = walletMode ? wallets.filter((w) => !w.is_archived && w.currency === flow.currency) : [];
+  const preferred = !isIn ? eligible.find((w) => reservedFor(reservations, project.id, w.id) > 0) : eligible[0];
+  const [walletId, setWalletId] = useState(preferred?.id ?? '');
+  const [raw, setRaw] = useState(String(debt ? Math.min(rest, remaining(debt.total_amount, debt.paid_amount)) : rest));
   const [busy, setBusy] = useState(false);
   const amount = parseAmount(raw);
-  const isIn = flow.direction === 'IN';
-  const can = amount > 0 && amount <= rest + 0.004 && !busy;
+  const wallet = eligible.find((w) => w.id === walletId);
+  const cap = debt ? Math.min(rest, remaining(debt.total_amount, debt.paid_amount)) : rest;
+  const lack = !isIn && !!wallet && amount > 0 && spendableForProject(wallet, reservations, project.id) < amount;
+  const can = amount > 0 && amount <= cap + 0.004 && !lack && !busy && !(debt && !wallet);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!can) return;
-    const pay = Math.min(round2(amount), rest);
-    let alloc = 0;
-    if (isIn) {
-      const c = convert(pay, flow.currency, project.currency, rates);
-      if (c === null) return notify(T('noRateNote'), 'error');
-      alloc = round2(c);
-    }
+    const pay = Math.min(round2(amount), cap);
     setBusy(true);
-    const { error } = await supabase().rpc('project_receive', { p_flow: flow.id, p_amount: pay, p_alloc: alloc });
+    let error: { message: string } | null;
+    if (isIn && debt && wallet) {
+      const c = convert(pay, flow.currency, project.currency, rates);
+      if (c === null) { setBusy(false); return notify(T('noRateNote'), 'error'); }
+      ({ error } = await supabase().rpc('debt_pay', {
+        p_debt: debt.id, p_wallet: wallet.id, p_amount: pay, p_project: project.id, p_project_amount: round2(c),
+      }));
+    } else if (isIn) {
+      const c = convert(pay, flow.currency, project.currency, rates);
+      if (c === null) { setBusy(false); return notify(T('noRateNote'), 'error'); }
+      ({ error } = await supabase().rpc('project_receive', { p_flow: flow.id, p_amount: pay, p_alloc: round2(c) }));
+    } else if (reservationsReady) {
+      ({ error } = await supabase().rpc('project_spend', { p_flow: flow.id, p_amount: pay, p_wallet: wallet?.id ?? null }));
+    } else {
+      ({ error } = await supabase().rpc('project_receive', { p_flow: flow.id, p_amount: pay, p_alloc: 0 }));
+    }
     setBusy(false);
     if (error) {
       const missing = /could not find the function|PGRST202|schema cache/i.test(error.message);
-      return notify(missing ? T('sqlV2Missing') : error.message, 'error');
+      return notify(missing ? T(walletMode ? 'sql8Missing' : 'sqlV2Missing') : error.message, 'error');
     }
-    await loadProjects();
+    await Promise.all([loadProjects(), loadReservations(), loadWallets(), loadDebts()]);
     onClose();
   }
 
@@ -200,8 +223,29 @@ export function PaySheet({ project, flow, onClose }: { project: Project; flow: P
         </p>
         <label className="block"><span className="label">{isIn ? T('payAmountIn') : T('payAmountOut')} ({flow.currency})</span>
           <input autoFocus className="field num font-mono" inputMode="decimal" dir="ltr" value={raw} onChange={(e) => setRaw(e.target.value)} /></label>
-        {amount > rest + 0.004 && <p className="text-xs text-rose-600">{T('payTooMuch')}</p>}
-        <p className="rounded-xl bg-amber-400/10 p-3 text-xs text-amber-800 dark:text-amber-200">{isIn ? T('payHintIn') : T('payHintOut')}</p>
+        {amount > cap + 0.004 && <p className="text-xs text-rose-600">{T('payTooMuch')}</p>}
+
+        {walletMode && (
+          <label className="block"><span className="label">{isIn ? T('receiveToWallet') : T('payFromWallet')}</span>
+            <select className="field" value={walletId} onChange={(e) => setWalletId(e.target.value)}>
+              {!isIn && <option value="">{T('recordOnly')}</option>}
+              {eligible.map((w) => {
+                const mine = reservedFor(reservations, project.id, w.id);
+                return (
+                  <option key={w.id} value={w.id}>
+                    {w.name} — {formatMoney(w.balance, w.currency, lang)}{mine > 0 ? ` (${T('reservedHere')}: ${formatMoney(mine, w.currency, lang)})` : ` (${T('freeShort')}: ${formatMoney(freeBalance(w, reserved), w.currency, lang)})`}
+                  </option>
+                );
+              })}
+            </select>
+            <span className="mt-1 block text-[11px] text-muted dark:text-night-muted">{T('walletCurOnly')}</span>
+          </label>
+        )}
+        {isIn && debt && eligible.length === 0 && <p className="text-xs text-amber-800 dark:text-amber-300">{T('noWalletSameCur')} ({flow.currency})</p>}
+        {lack && <p className="text-xs text-rose-600">{T('insufficientFree')}</p>}
+        <p className="rounded-xl bg-amber-400/10 p-3 text-xs text-amber-800 dark:text-amber-200">
+          {isIn ? (debt ? T('receiveHint') : T('payHintIn')) : wallet ? T('spendWalletHint') : T('payHintOut')}
+        </p>
         <button type="submit" disabled={!can} className="btn btn-primary w-full py-3">
           {busy && <Loader2 className="size-4 animate-spin" aria-hidden />} {T('save')}
         </button>

@@ -1,24 +1,19 @@
 'use client';
 
-import { useState } from 'react';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { useApp } from '@/components/Providers';
 import { useData } from '@/lib/data';
 import { tx } from '@/lib/text';
 import { RateStrip } from '@/components/home/RateStrip';
-import { WalletScroller } from '@/components/home/WalletScroller';
+import { CurrencyCards } from '@/components/home/CurrencyCards';
 import { SudanQuick } from '@/components/home/SudanQuick';
 import { DueAndTasks } from '@/components/home/DueAndTasks';
 import { HomeProjects } from '@/components/home/HomeProjects';
-import { WalletForm } from '@/components/WalletForm';
-import type { Wallet } from '@/lib/types';
 
 export default function HomePage() {
   const { lang } = useApp();
   const T = (k: Parameters<typeof tx>[1]) => tx(lang, k);
   const data = useData();
-  // undefined = closed, null = new wallet, Wallet = editing
-  const [walletSheet, setWalletSheet] = useState<Wallet | null | undefined>(undefined);
 
   return (
     <>
@@ -37,7 +32,7 @@ export default function HomePage() {
         </div>
       ) : (
         <div className="mt-4 space-y-5">
-          <WalletScroller wallets={data.wallets} onAdd={() => setWalletSheet(null)} onEdit={(w) => setWalletSheet(w)} />
+          <CurrencyCards wallets={data.wallets} reserved={data.reserved} />
           <div className="grid gap-5 lg:grid-cols-2">
             <SudanQuick wallets={data.wallets} rates={data.rates} onDone={data.refreshMoney} />
             <DueAndTasks debts={data.debts} tasks={data.tasks} />
@@ -46,9 +41,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {walletSheet !== undefined && (
-        <WalletForm wallet={walletSheet} onClose={() => setWalletSheet(undefined)} onSaved={data.loadWallets} />
-      )}
     </>
   );
 }

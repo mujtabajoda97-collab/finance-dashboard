@@ -1,13 +1,16 @@
 'use client';
 
-import { AlertTriangle, Banknote, Landmark, Pencil, Plus, Wallet as WalletIcon } from 'lucide-react';
+import { AlertTriangle, Banknote, Landmark, Lock, Pencil, Plus, Wallet as WalletIcon } from 'lucide-react';
 import { useApp } from './Providers';
 import { formatMoney, fromAED, toAED } from '@/lib/currency';
+import { freeBalance } from '@/lib/reserve';
+import { px as ptx } from '@/lib/ptext';
 import type { RateMap, Wallet } from '@/lib/types';
 
 interface Props {
   wallets: Wallet[];
   rates: RateMap;
+  reserved: Map<string, number>;
   onAdd: () => void;
   onEdit: (w: Wallet) => void;
 }
@@ -19,7 +22,7 @@ function iconFor(name: string) {
   return WalletIcon;
 }
 
-export function BalanceCards({ wallets, rates, onAdd, onEdit }: Props) {
+export function BalanceCards({ wallets, rates, reserved, onAdd, onEdit }: Props) {
   const { t, lang } = useApp();
 
   let totalAED = 0;
@@ -72,6 +75,18 @@ export function BalanceCards({ wallets, rates, onAdd, onEdit }: Props) {
               <p className={`num mt-0.5 font-mono text-lg font-semibold ${low ? 'text-rose-600 dark:text-rose-300' : ''}`}>
                 {formatMoney(w.balance, w.currency, lang)}
               </p>
+              {(reserved.get(w.id) ?? 0) > 0 && (
+                <div className="num mt-1.5 space-y-0.5 border-t border-line pt-1.5 text-[11px] dark:border-night-line">
+                  <p className="flex items-center justify-between gap-1 text-muted dark:text-night-muted">
+                    <span className="inline-flex items-center gap-1"><Lock className="size-3" aria-hidden />{ptx(lang, 'reservedLabel')}</span>
+                    <span className="font-mono" dir="ltr">− {formatMoney(reserved.get(w.id) ?? 0, w.currency, lang)}</span>
+                  </p>
+                  <p className="flex items-center justify-between gap-1 font-semibold text-emerald-700 dark:text-emerald-300">
+                    <span>{ptx(lang, 'freeLabel')}</span>
+                    <span className="font-mono" dir="ltr">{formatMoney(freeBalance(w, reserved), w.currency, lang)}</span>
+                  </p>
+                </div>
+              )}
               {low && (
                 <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-rose-600 dark:text-rose-300">
                   <AlertTriangle className="size-3" aria-hidden /> {t('belowMin')}

@@ -36,6 +36,10 @@ export interface ProjectSummary {
   daysLeft: number | null;
   /** true when some item could not be converted (no rate) and was skipped */
   partial: boolean;
+  /** sum of the planned amounts of all expense items (budget breakdown) */
+  itemsTotal: number;
+  /** budget not yet broken into items (never below 0) */
+  unallocatedBudget: number;
 }
 
 function conv(amount: number, from: Currency, to: Currency, rates: RateMap): number | null {
@@ -45,14 +49,16 @@ function conv(amount: number, from: Currency, to: Currency, rates: RateMap): num
 }
 
 export function summarize(p: Project, flows: ProjectCashflow[], rates: RateMap, today: string): ProjectSummary {
-  let spent = 0, pendingOut = 0, pendingIn = 0, inBefore = 0, inAfter = 0, partial = false;
+  let spent = 0, pendingOut = 0, pendingIn = 0, inBefore = 0, inAfter = 0, itemsTotal = 0, partial = false;
   const target = p.target_date ?? null;
   for (const f of flows) {
     if (f.project_id !== p.id) continue;
     const paid = conv(flowPaid(f), f.currency, p.currency, rates);
     const rest = conv(flowRest(f), f.currency, p.currency, rates);
-    if (paid === null || rest === null) { partial = true; continue; }
+    const full = conv(f.amount, f.currency, p.currency, rates);
+    if (paid === null || rest === null || full === null) { partial = true; continue; }
     if (f.direction === 'OUT') {
+      itemsTotal += full;
       spent += paid;
       pendingOut += rest;
     } else {
@@ -81,5 +87,7 @@ export function summarize(p: Project, flows: ProjectCashflow[], rates: RateMap, 
     hasDate: !!target,
     daysLeft,
     partial,
+    itemsTotal: round2(itemsTotal),
+    unallocatedBudget: round2(Math.max(0, p.budget - itemsTotal)),
   };
 }

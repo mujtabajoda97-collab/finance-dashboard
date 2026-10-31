@@ -21,6 +21,14 @@ const ar = {
   payOut: 'تسجيل صرف', payIn: 'تسجيل استلام', payAmountOut: 'المبلغ المصروف', payAmountIn: 'المبلغ المستلم', paidWord: 'مدفوع', restWord: 'متبقٍ', undo: 'تراجع',
   payHintIn: 'يُضاف المبلغ المستلم فوراً إلى المخصص، ويبقى الباقي معلّقاً في التدفقات القادمة.', payHintOut: 'يُخصم من التكلفة المتبقية ويُثبَّت كمصروف منفّذ.',
   payTooMuch: 'المبلغ أكبر من المتبقي', sqlV2Missing: 'الدفعات الجزئية تحتاج تشغيل ملف SQL 0007 في Supabase أولاً.', sourcePlaceholder: 'راتب، دين مسترد، مساهمة…', coverageTitle: 'هل تكفي المتوقعات قبل الموعد؟', fundsNow: 'المخصص حالياً',
+  noWalletsHome: 'أضف محفظتك الأولى من تبويب المالية لتبدأ.', byCurrency: 'ملخص الأرصدة حسب العملة', totalLabel: 'إجمالي الرصيد', reservedLabel: 'محجوز للمشاريع', freeLabel: 'الرصيد الحر', walletsCount: 'محافظ',
+  walletDetails: 'تفاصيل المحافظ', lowWallets: 'تحت الحد الأدنى', reserveToProject: 'توجيه وحجز المبلغ لمشروع', noProjectOpt: 'بدون (يبقى رصيداً حراً)',
+  reserveNote: 'يدخل المبلغ المحفظة ويُحجز للمشروع، فلا يظهر ضمن الرصيد الحر ولا يمكن صرفه بالخطأ.', reservePreview: 'يزيد المخصص في المشروع بمقدار',
+  addBudgetItem: 'إضافة بند ميزانية / مصروف فرعي', budgetItems: 'بنود الميزانية', unallocatedBudget: 'غير موزّع على بنود', itemDesc: 'وصف البند', estAmount: 'المبلغ المقدَّر',
+  payFromWallet: 'الدفع من محفظة', recordOnly: 'تسجيل فقط (بدون خصم من محفظة)', reservedHere: 'محجوز لهذا المشروع', insufficientFree: 'الرصيد المتاح غير كافٍ',
+  receiveToWallet: 'الاستلام في محفظة', sql8Missing: 'هذه الميزة تحتاج تشغيل SQL 0008 في Supabase أولاً.', reservedInWallets: 'محجوز في المحافظ',
+  freeShort: 'الحر', walletCurOnly: 'تظهر المحافظ بنفس عملة البند فقط', receiveHint: 'يدخل المبلغ المحفظة ويُحجز لهذا المشروع، ويُسجَّل كدفعة على الدين المرتبط.',
+  spendWalletHint: 'يُخصم من المحفظة كمصروف حقيقي ويُفرَج عن الحجز بنفس المبلغ.',
   projectsTotal: 'مشاريع نشطة', noRateNote: 'بعض المبالغ لم تُحوَّل لغياب السعر', nextDue: 'أقرب استحقاق', open: 'فتح',
 };
 export type PKey = keyof typeof ar;
@@ -44,6 +52,14 @@ const en: Record<PKey, string> = {
   payOut: 'Record spending', payIn: 'Record receipt', payAmountOut: 'Amount spent', payAmountIn: 'Amount received', paidWord: 'Paid', restWord: 'Left', undo: 'Undo',
   payHintIn: 'The received amount is added to the set-aside amount now; the rest stays pending.', payHintOut: 'It reduces the remaining cost and is recorded as executed spending.',
   payTooMuch: 'Amount is more than what is left', sqlV2Missing: 'Partial payments need SQL 0007 to be run in Supabase first.', sourcePlaceholder: 'Salary, repaid debt, contribution…', coverageTitle: 'Will expected inflows suffice by the date?', fundsNow: 'Set aside now',
+  noWalletsHome: 'Add your first wallet from the Finance tab to get started.', byCurrency: 'Balances by currency', totalLabel: 'Total balance', reservedLabel: 'Reserved for projects', freeLabel: 'Free balance', walletsCount: 'wallets',
+  walletDetails: 'Wallet details', lowWallets: 'below minimum', reserveToProject: 'Direct & reserve this amount for a project', noProjectOpt: 'None (stays free balance)',
+  reserveNote: 'The money enters the wallet but is reserved for the project, so it is not part of the free balance and cannot be spent by mistake.', reservePreview: 'Project set-aside increases by',
+  addBudgetItem: 'Add budget item / sub-expense', budgetItems: 'Budget items', unallocatedBudget: 'Not broken into items', itemDesc: 'Item description', estAmount: 'Estimated amount',
+  payFromWallet: 'Pay from wallet', recordOnly: 'Record only (no wallet deduction)', reservedHere: 'Reserved for this project', insufficientFree: 'Available balance is not enough',
+  receiveToWallet: 'Receive into wallet', sql8Missing: 'This feature needs SQL 0008 to be run in Supabase first.', reservedInWallets: 'Reserved in wallets',
+  freeShort: 'Free', walletCurOnly: 'Only wallets in the item currency are listed', receiveHint: 'The money enters the wallet, is reserved for this project and recorded as a payment on the linked debt.',
+  spendWalletHint: 'It is deducted from the wallet as a real expense and the reservation is released by the same amount.',
   projectsTotal: 'Active projects', noRateNote: 'Some amounts were not converted (missing rate)', nextDue: 'Next due', open: 'Open',
 };
 const dicts: Record<Lang, Record<PKey, string>> = { ar, en };

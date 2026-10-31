@@ -68,3 +68,19 @@ test('legacy rows (no paid_amount) treat is_done as fully paid', () => {
   assert.equal(flowPaid(f), 1000);
   assert.equal(flowRest(f), 0);
 });
+
+test('budget breakdown: items total, unallocated budget, partial deposit reduces remaining cost', () => {
+  const items = [F({ title: 'tickets', amount: 4000, paid_amount: 2000 }), F({ title: 'hall', amount: 6000 })];
+  const s = summarize(P({ budget: 12000, allocated_amount: 0 }), items, rates, TODAY);
+  assert.equal(s.itemsTotal, 10000);
+  assert.equal(s.unallocatedBudget, 2000);
+  assert.equal(s.spent, 2000);
+  assert.equal(s.remainingCost, 10000); // budget 12000 - spent 2000
+  assert.equal(s.pendingOut, 8000);
+});
+
+test('items above the budget never give a negative unallocated amount', () => {
+  const s = summarize(P({ budget: 1000, allocated_amount: 0 }), [F({ amount: 4000 })], rates, TODAY);
+  assert.equal(s.unallocatedBudget, 0);
+  assert.equal(s.remainingCost, 4000);
+});

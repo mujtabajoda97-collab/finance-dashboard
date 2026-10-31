@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabase';
-import type { AlertLog, Debt, Profile, Project, ProjectCashflow, RatePoint } from './types';
+import { reservedByWallet } from './reserve';
+import type { AlertLog, Debt, FundReservation, Profile, Project, ProjectCashflow, RatePoint } from './types';
 
 /** Debts, alert log, profile and 7-day rate history. Each part fails on its own without breaking the app. */
 export function useExtraData(enabled: boolean) {
@@ -16,6 +17,10 @@ export function useExtraData(enabled: boolean) {
   const [projectsReady, setProjectsReady] = useState(true);
   /** true once SQL 0007 (target_date, paid_amount, project_receive) is applied. */
   const [projectsV2, setProjectsV2] = useState(false);
+  const [reservations, setReservations] = useState<FundReservation[]>([]);
+  /** true once SQL 0008 (fund_reservations, debt_pay, project_spend) is applied. */
+  const [reservationsReady, setReservationsReady] = useState(false);
+  const reserved = useMemo(() => reservedByWallet(reservations), [reservations]);
   const [extraError, setExtraError] = useState<string | null>(null);
 
   const loadDebts = useCallback(async () => {
@@ -66,6 +71,21 @@ export function useExtraData(enabled: boolean) {
     setCashflows(cr.map((r) => ({ ...r, amount: Number(r.amount), ...(v2 ? { paid_amount: Number(r.paid_amount ?? 0) } : {}) })) as unknown as ProjectCashflow[]);
   }, []);
 
+  const loadReservations = useCallback(async () => {
+    const { data, error } = await supabase()
+      .from('fund_reservations')
+      .select('id,project_id,wallet_id,amount,project_amount,created_at')
+      .limit(2000);
+    if (error) { // table missing until SQL 0008 is applied: fail-soft
+      setReservationsReady(false);
+      setReservations([]);
+      return;
+    }
+    setReservationsReady(true);
+    const rows = (data ?? []) as unknown as Record<string, unknown>[];
+    setReservations(rows.map((r) => ({ ...r, amount: Number(r.amount), project_amount: Number(r.project_amount) })) as unknown as FundReservation[]);
+  }, []);
+
   const loadAlerts = useCallback(async () => {
     const { data, error } = await supabase()
       .from('alert_logs')
@@ -100,14 +120,14 @@ export function useExtraData(enabled: boolean) {
   }, []);
 
   const loadExtra = useCallback(async () => {
-    const results = await Promise.allSettled([loadDebts(), loadAlerts(), loadProfile(), loadRateHistory(), loadProjects()]);
+    const results = await Promise.allSettled([loadDebts(), loadAlerts(), loadProfile(), loadRateHistory(), loadProjects(), loadReservations()]);
     const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
     setExtraError(failed ? String(failed.reason?.message ?? failed.reason) : null);
-  }, [loadDebts, loadAlerts, loadProfile, loadRateHistory, loadProjects]);
+  }, [loadDebts, loadAlerts, loadProfile, loadRateHistory, loadProjects, loadReservations]);
 
   useEffect(() => {
     if (enabled) loadExtra();
   }, [enabled, loadExtra]);
 
-  return { debts, alerts, profile, rateHistory, projects, cashflows, projectsReady, projectsV2, loadProjects, extraError, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadExtra };
+  return { debts, alerts, profile, rateHistory, projects, cashflows, projectsReady, projectsV2, loadProjects, reservations, reservationsReady, reserved, loadReservations, extraError, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadExtra };
 }

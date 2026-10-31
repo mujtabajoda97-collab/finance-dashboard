@@ -16,7 +16,7 @@ type K = AnyKey;
 
 export function ProjectsPanel() {
   const { lang, notify } = useApp();
-  const { projects, cashflows, projectsReady, projectsV2, rates, loadProjects } = useData();
+  const { projects, cashflows, projectsReady, projectsV2, rates, wallets, reservations, loadProjects } = useData();
   const T = (k: K) => tx(lang, k);
   const today = todayDubai();
   const [sheet, setSheet] = useState<Project | null | undefined>(undefined);
@@ -57,7 +57,7 @@ export function ProjectsPanel() {
         const flows = cashflows.filter((f) => f.project_id === p.id);
         const ok = s.net >= 0;
         const lists: { dir: 'OUT' | 'IN'; label: K; add: K }[] = [
-          { dir: 'OUT', label: 'outflows', add: 'addOutflow' },
+          { dir: 'OUT', label: 'budgetItems', add: 'addBudgetItem' },
           { dir: 'IN', label: 'inflows', add: 'addInflow' },
         ];
         return (
@@ -93,6 +93,27 @@ export function ProjectsPanel() {
                 </div>
               ))}
             </div>
+
+            {flows.some((f) => f.direction === 'OUT') && (
+              <p className="num text-[11px] text-muted dark:text-night-muted">
+                {T('budgetItems')}: {m(s.itemsTotal)} {T('progressOf')} {m(p.budget)}
+                {s.unallocatedBudget > 0 && <> · {T('unallocatedBudget')}: {m(s.unallocatedBudget)}</>}
+              </p>
+            )}
+            {(() => {
+              const mine = reservations.filter((r) => r.project_id === p.id);
+              if (mine.length === 0) return null;
+              const by = new Map<string, number>();
+              for (const r of mine) by.set(r.wallet_id, (by.get(r.wallet_id) ?? 0) + r.amount);
+              return (
+                <p className="num text-[11px] text-emerald-800 dark:text-emerald-300">
+                  {T('reservedInWallets')}: {[...by].map(([id, amt]) => {
+                    const w = wallets.find((x) => x.id === id);
+                    return `${w?.name ?? '—'} ${formatMoney(amt, w?.currency ?? p.currency, lang)}`;
+                  }).join(' · ')}
+                </p>
+              );
+            })()}
 
             {/* Coverage indicator: do the expected inflows cover what is left before the date? */}
             <div className={`space-y-1 rounded-xl px-3 py-2 text-sm ${ok ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300' : 'bg-rose-500/10 text-rose-800 dark:text-rose-300'}`}>

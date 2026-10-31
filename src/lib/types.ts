@@ -124,3 +124,15 @@ export interface ProjectCashflow {
   /** Amount already paid / received (partial payments). Present only after SQL 0007. */
   paid_amount?: number;
 }
+
+/** Money reserved for a project inside a wallet. Present only after SQL 0008. */
+export interface FundReservation {
+  id: string;
+  project_id: string;
+  wallet_id: string;
+  /** In the wallet currency. */
+  amount: number;
+  /** The same money in the project currency. */
+  project_amount: number;
+  created_at: string;
+}

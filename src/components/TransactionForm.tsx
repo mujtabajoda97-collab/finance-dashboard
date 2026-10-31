@@ -4,6 +4,9 @@ import { useMemo, useRef, useState } from 'react';
 import { Loader2, Lock, Trash2 } from 'lucide-react';
 import { useApp } from './Providers';
 import { Sheet } from './Sheet';
+import { useData } from '@/lib/data';
+import { freeBalance } from '@/lib/reserve';
+import { px as ptx } from '@/lib/ptext';
 import { supabase } from '@/lib/supabase';
 import { formatMoney, parseAmount, round2 } from '@/lib/currency';
 import { buildTxnRow, overdrawn, singleFlight, suggestToAmount, toCents, txnEffects, validateTransfer, type TxnLike } from '@/lib/finance';
@@ -48,6 +51,9 @@ export function TransactionForm({ txn, wallets, rates, onClose, onSaved }: Props
   const requestId = useRef(newRequestId());
   const flight = useRef(singleFlight());
 
+  const { reserved } = useData();
+  // Money reserved for projects is not available for ordinary spending or transfers.
+  const freeWallets = useMemo(() => wallets.map((w) => ({ ...w, balance: freeBalance(w, reserved) })), [wallets, reserved]);
   const from = wallets.find((w) => w.id === walletId);
   const to = wallets.find((w) => w.id === toWalletId);
   const amount = parseAmount(raw);
@@ -72,7 +78,7 @@ export function TransactionForm({ txn, wallets, rates, onClose, onSaved }: Props
   }, [sudan, from, to, kind, amount, cross, toAmount]);
 
   const before: TxnLike | null = txn ? { type: txn.type, wallet_id: txn.wallet_id, to_wallet_id: txn.to_wallet_id, amount: txn.amount, to_amount: txn.to_amount } : null;
-  const overdraws = proposed && kind !== 'INCOME' ? overdrawn(wallets, before, proposed) : [];
+  const overdraws = proposed && kind !== 'INCOME' ? overdrawn(freeWallets, before, proposed) : [];
   const projected = useMemo(() => {
     if (!proposed || !from) return null;
     const eff = txnEffects(proposed);
@@ -253,6 +259,11 @@ export function TransactionForm({ txn, wallets, rates, onClose, onSaved }: Props
           {!sudan && projected !== null && from && (
             <p className={`text-xs ${overdraws.length ? 'font-semibold text-rose-600' : 'text-muted dark:text-night-muted'}`}>
               {t('balanceAfter')} ({from.name}): <span className="num font-mono">{formatMoney(projected, from.currency, lang)}</span>
+            </p>
+          )}
+          {!sudan && from && (reserved.get(from.id) ?? 0) > 0 && (
+            <p className="num flex items-center gap-1 text-xs text-emerald-800 dark:text-emerald-300">
+              <Lock className="size-3" aria-hidden /> {ptx(lang, 'reservedLabel')}: {formatMoney(reserved.get(from.id) ?? 0, from.currency, lang)} · {ptx(lang, 'freeLabel')}: {formatMoney(freeBalance(from, reserved), from.currency, lang)}
             </p>
           )}
 
