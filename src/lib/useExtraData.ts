@@ -1,0 +1,98 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { supabase } from './supabase';
+import type { AlertLog, Debt, Profile, Project, ProjectCashflow, RatePoint } from './types';
+
+/** Debts, alert log, profile and 7-day rate history. Each part fails on its own without breaking the app. */
+export function useExtraData(enabled: boolean) {
+  const [debts, setDebts] = useState<Debt[]>([]);
+  const [alerts, setAlerts] = useState<AlertLog[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [rateHistory, setRateHistory] = useState<RatePoint[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [cashflows, setCashflows] = useState<ProjectCashflow[]>([]);
+  /** false when the projects tables do not exist yet (SQL 0005 not applied). */
+  const [projectsReady, setProjectsReady] = useState(true);
+  const [extraError, setExtraError] = useState<string | null>(null);
+
+  const loadDebts = useCallback(async () => {
+    const base = 'id,person_name,type,currency,total_amount,paid_amount,due_date,status,notes,created_at';
+    const q = (cols: string) =>
+      supabase().from('debts').select(cols)
+        .order('due_date', { ascending: true, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(500);
+    let res = await q(`${base},remind_before_minutes`);
+    // Column missing until SQL 0005 is applied: fall back to the basic columns.
+    if (res.error) res = await q(base);
+    if (res.error) throw res.error;
+    const rows = (res.data ?? []) as unknown as Record<string, unknown>[];
+    setDebts(
+      rows.map((d) => ({ ...d, total_amount: Number(d.total_amount), paid_amount: Number(d.paid_amount) })) as unknown as Debt[],
+    );
+  }, []);
+
+  const loadProjects = useCallback(async () => {
+    const [p, c] = await Promise.all([
+      supabase().from('projects').select('id,name,budget,currency,allocated_amount,notes,is_archived,created_at')
+        .eq('is_archived', false).order('created_at', { ascending: false }).limit(200),
+      supabase().from('project_cashflows').select('id,project_id,direction,title,amount,currency,due_date,is_done,debt_id')
+        .order('due_date', { ascending: true, nullsFirst: false }).limit(2000),
+    ]);
+    if (p.error || c.error) {
+      setProjectsReady(false);
+      setProjects([]);
+      setCashflows([]);
+      return; // fail-soft: the rest of the app keeps working
+    }
+    setProjectsReady(true);
+    setProjects((p.data ?? []).map((r) => ({ ...r, budget: Number(r.budget), allocated_amount: Number(r.allocated_amount) })) as Project[]);
+    setCashflows((c.data ?? []).map((r) => ({ ...r, amount: Number(r.amount) })) as ProjectCashflow[]);
+  }, []);
+
+  const loadAlerts = useCallback(async () => {
+    const { data, error } = await supabase()
+      .from('alert_logs')
+      .select('id,alert_type,message,created_at')
+      .order('created_at', { ascending: false })
+      .limit(30);
+    if (error) throw error;
+    setAlerts((data ?? []) as AlertLog[]);
+  }, []);
+
+  const loadProfile = useCallback(async () => {
+    const q = (cols: string) => supabase().from('profiles').select(cols).maybeSingle();
+    let res = await q('display_name,telegram_chat_id,whatsapp_phone,green_api_id_instance,green_api_token_instance');
+    // New columns missing until SQL 0006 is applied: fall back to the basic ones.
+    if (res.error) res = await q('display_name,telegram_chat_id,whatsapp_phone');
+    if (res.error) throw res.error;
+    setProfile((res.data ?? null) as unknown as Profile | null);
+  }, []);
+
+  const loadRateHistory = useCallback(async () => {
+    const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const { data, error } = await supabase()
+      .from('exchange_rate_history')
+      .select('rate,recorded_at')
+      .eq('base_currency', 'AED')
+      .eq('target_currency', 'SDG')
+      .gte('recorded_at', since)
+      .order('recorded_at', { ascending: true })
+      .limit(500);
+    if (error) throw error;
+    setRateHistory((data ?? []).map((r) => ({ rate: Number(r.rate), recorded_at: r.recorded_at })));
+  }, []);
+
+  const loadExtra = useCallback(async () => {
+    const results = await Promise.allSettled([loadDebts(), loadAlerts(), loadProfile(), loadRateHistory(), loadProjects()]);
+    const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
+    setExtraError(failed ? String(failed.reason?.message ?? failed.reason) : null);
+  }, [loadDebts, loadAlerts, loadProfile, loadRateHistory, loadProjects]);
+
+  useEffect(() => {
+    if (enabled) loadExtra();
+  }, [enabled, loadExtra]);
+
+  return { debts, alerts, profile, rateHistory, projects, cashflows, projectsReady, loadProjects, extraError, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadExtra };
+}

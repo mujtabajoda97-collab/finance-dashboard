@@ -1,0 +1,32 @@
+# dependencies & build output
+node_modules
+.next
+out
+*.tsbuildinfo
+next-env.d.ts
+
+# secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*secret*
+service-role*
+
+# tooling / OS
+.vercel
+.DS_Store
+*.log
+.npm
+coverage
+*.zip
+*.dump
+backups/
+
+# android build output (the android/ project itself is generated in CI by `cap add android`)
+android/.gradle
+android/build
+android/app/build
+android/local.properties
+android/capacitor-cordova-android-plugins
+.idea

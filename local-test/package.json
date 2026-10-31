@@ -1,0 +1,11 @@
+{
+  "name": "my-life-os-local-test",
+  "private": true,
+  "type": "module",
+  "description": "Local-only Supabase CLI + Docker test harness for migration 0003 (never touches the real project)",
+  "scripts": {
+    "test:guards": "node --test tests/guards.test.mjs",
+    "all": "bash scripts/run-all.sh"
+  },
+  "devDependencies": {}
+}

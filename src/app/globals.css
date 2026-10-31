@@ -1,0 +1,117 @@
+@import 'tailwindcss';
+
+/* Class-based dark mode: <html class="dark"> */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-paper: #f6f4ef;
+  --color-ink: #13201d;
+  --color-card: #ffffff;
+  --color-line: #e4e0d6;
+  --color-muted: #6b746f;
+
+  --color-night: #07130f;
+  --color-night-card: #0e2a21;
+  --color-night-line: #1f4034;
+  --color-night-muted: #86a99b;
+
+  --color-brand-50: #ecfdf7;
+  --color-brand-100: #d1faec;
+  --color-brand-400: #34c79a;
+  --color-brand-500: #12a37a;
+  --color-brand-600: #0b8464;
+  --color-brand-700: #0a6a51;
+  --color-brand-900: #063a2d;
+
+  --color-gold: #c0882b;
+}
+
+/* Font families come from next/font CSS variables (set on <html>). */
+@theme inline {
+  --font-sans: var(--font-plex-arabic), var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-paper font-sans text-ink antialiased dark:bg-night dark:text-paper;
+    min-height: 100dvh;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* Numbers always read left-to-right, even inside RTL text. */
+  .num {
+    direction: ltr;
+    unicode-bidi: isolate;
+    font-variant-numeric: tabular-nums;
+  }
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-3xl border border-line bg-card p-4 shadow-[0_1px_0_rgba(0,0,0,0.02)] sm:p-5 dark:border-night-line dark:bg-gradient-to-br dark:from-[#12342a] dark:to-[#0c231c];
+  }
+  .field {
+    @apply w-full rounded-2xl border border-line bg-paper/60 px-3.5 py-2.5 text-base outline-none transition placeholder:text-muted/70 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-night-line dark:bg-night/60 dark:placeholder:text-night-muted/70;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-semibold text-muted dark:text-night-muted;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-brand-600 text-white hover:bg-brand-700 dark:bg-brand-500 dark:text-night dark:hover:bg-brand-400;
+  }
+  .btn-ghost {
+    @apply text-ink hover:bg-ink/5 dark:text-paper dark:hover:bg-paper/10;
+  }
+  .icon-btn {
+    @apply inline-flex size-10 items-center justify-center rounded-full border border-line bg-card text-ink transition hover:bg-paper active:scale-95 dark:border-night-line dark:bg-night-card dark:text-paper dark:hover:bg-night;
+  }
+  .segmented {
+    @apply flex rounded-2xl bg-paper p-1 dark:bg-night;
+  }
+  .segmented > button {
+    @apply flex-1 rounded-xl px-2 py-2 text-sm font-semibold text-muted transition dark:text-night-muted;
+  }
+  .segmented > button[aria-pressed='true'] {
+    @apply bg-card text-ink shadow-sm dark:bg-night-card dark:text-paper;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.toast-in {
+  animation: toast-in 180ms ease-out;
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.sheet-in {
+  animation: sheet-in 200ms ease-out;
+}
