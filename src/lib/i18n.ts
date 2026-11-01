@@ -62,7 +62,7 @@ const ar = {
   done: 'تمت العملية بنجاح',
   insufficient: 'الرصيد لا يكفي لهذه العملية',
   lowAfter: 'سينزل الرصيد تحت الحد الأدنى',
-  rateLocked: 'سيُثبَّت سعر الصرف',
+  rateLocked: 'سيُثبّت سعر الصرف',
   // tasks
   quickTasks: 'مهام اليوم',
   overdue: 'متأخرة',
