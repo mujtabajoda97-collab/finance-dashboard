@@ -36,10 +36,13 @@ export function AlarmEngine() {
     () => ({ lang, task: tx(lang, 'msgTask'), debt: tx(lang, 'msgDebt'), flow: px(lang, 'alarmProjectItem') }),
     [lang],
   );
-  const items = useMemo(
-    () => buildAlarmItems({ tasks, debts, projects, cashflows }, labels, now),
-    [tasks, debts, projects, cashflows, labels, now],
-  );
+  const items = useMemo(() => {
+    try {
+      return buildAlarmItems({ tasks, debts, projects, cashflows }, labels, now);
+    } catch {
+      return []; // an unexpected row shape must never break the app
+    }
+  }, [tasks, debts, projects, cashflows, labels, now]);
   const signature = items.map((i) => `${ackKey(i.key, i.at)}|${i.body}`).join('\n') + `#${ackV}`;
   const latest = useRef(items);
   latest.current = items;
@@ -68,15 +71,27 @@ export function AlarmEngine() {
     if (!ln) return;
     let handle: { remove(): Promise<void> } | null = null;
     let gone = false;
-    ln.addListener('localNotificationActionPerformed', (e) => {
-      const n = e.notification;
-      if (!n || typeof n.id !== 'number') return;
-      if (n.extra?.key && typeof n.extra.at === 'number') ackAlarm(n.extra.key, n.extra.at);
-      void ln.cancel({ notifications: seriesOf(n.id).map((id) => ({ id })) }).catch(() => undefined);
-      setAckV((v) => v + 1);
-      if (n.extra?.url) router.push(n.extra.url);
-    }).then((h) => { if (gone) void h.remove(); else handle = h; }).catch(() => undefined);
-    return () => { gone = true; void handle?.remove(); };
+    try {
+      // The plugin may be missing or unimplemented in an older app build: never let that crash the app.
+      void Promise.resolve(ln.addListener('localNotificationActionPerformed', (e) => {
+        try {
+          const n = e?.notification;
+          if (!n || typeof n.id !== 'number') return;
+          if (n.extra?.key && typeof n.extra.at === 'number') ackAlarm(n.extra.key, n.extra.at);
+          void Promise.resolve(ln.cancel({ notifications: seriesOf(n.id).map((id) => ({ id })) })).catch(() => undefined);
+          setAckV((v) => v + 1);
+          if (n.extra?.url) router.push(n.extra.url);
+        } catch {
+          /* ignore a malformed notification event */
+        }
+      })).then((h) => { if (gone) void h?.remove?.(); else handle = h ?? null; }).catch(() => undefined);
+    } catch {
+      /* no native plugin */
+    }
+    return () => {
+      gone = true;
+      try { void Promise.resolve(handle?.remove()).catch(() => undefined); } catch { /* already removed */ }
+    };
   }, [router]);
 
   // ---- Browser: the settings "test" button ----

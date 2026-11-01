@@ -59,7 +59,8 @@ export function buildAlarmItems(
   now: number,
 ): AlarmItem[] {
   const out: AlarmItem[] = [];
-  const keep = (at: number | null): at is number => at !== null && at > now - WINDOW_MS && at < now + HORIZON_MS;
+  const keep = (at: number | null): at is number => at !== null && Number.isFinite(at) && at > now - WINDOW_MS && at < now + HORIZON_MS;
+  src = { tasks: src?.tasks ?? [], debts: src?.debts ?? [], projects: src?.projects ?? [], cashflows: src?.cashflows ?? [] };
 
   for (const t of src.tasks) {
     if (!t.alarm_enabled || t.is_completed) continue;
@@ -199,10 +200,16 @@ let cached: LocalNotificationsApi | null | undefined;
 export function nativeNotifications(): LocalNotificationsApi | null {
   if (cached !== undefined) return cached;
   if (typeof window === 'undefined') return null;
-  const cap = (window as unknown as { Capacitor?: CapacitorGlobal }).Capacitor;
-  if (!cap?.isNativePlatform?.()) return (cached = null);
-  const plugin = (cap.Plugins?.LocalNotifications ?? cap.registerPlugin?.('LocalNotifications')) as LocalNotificationsApi | undefined;
-  return (cached = plugin ?? null);
+  try {
+    const cap = (window as unknown as { Capacitor?: CapacitorGlobal }).Capacitor;
+    if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return (cached = null);
+    const plugin = (cap.Plugins?.LocalNotifications ?? cap.registerPlugin?.('LocalNotifications')) as LocalNotificationsApi | undefined;
+    // An older app build may not contain the plugin: treat that as "no native alarms" instead of failing.
+    const ok = !!plugin && typeof plugin.schedule === 'function' && typeof plugin.addListener === 'function';
+    return (cached = ok ? plugin! : null);
+  } catch {
+    return (cached = null);
+  }
 }
 export const isNativeApp = () => nativeNotifications() !== null;
 

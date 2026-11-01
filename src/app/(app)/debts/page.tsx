@@ -8,6 +8,7 @@ import { PaymentForm } from '@/components/debts/PaymentForm';
 import { DebtForm } from '@/components/debts/DebtForm';
 import { IncreaseForm } from '@/components/debts/IncreaseForm';
 import { DebtHistory } from '@/components/debts/DebtHistory';
+import { SafeBoundary } from '@/components/SafeBoundary';
 import { AlarmToggle } from '@/components/AlarmToggle';
 import { setAlarmFlag } from '@/lib/alarm';
 import { px } from '@/lib/ptext';
@@ -113,7 +114,7 @@ export default function DebtsPage() {
                         </button>
                       </div>
                     )}
-                    <DebtHistory debt={d} version={`${d.paid_amount}:${d.total_amount}:${histV}`} />
+                    <SafeBoundary><DebtHistory debt={d} version={`${d.paid_amount}:${d.total_amount}:${histV}`} /></SafeBoundary>
                   </div>
                 )}
               </li>

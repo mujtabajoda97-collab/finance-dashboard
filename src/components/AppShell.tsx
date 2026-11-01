@@ -7,6 +7,7 @@ import { useApp } from './Providers';
 import { APP_TZ, intlLocale } from '@/lib/time';
 import { AlertEngine } from './AlertEngine';
 import { AlarmEngine } from './AlarmEngine';
+import { SafeBoundary } from './SafeBoundary';
 import { supabase } from '@/lib/supabase';
 import { useData } from '@/lib/data';
 import { liveAlerts } from '@/lib/derived';
@@ -109,7 +110,7 @@ export function AppShell({ email, children }: { email: string; children: React.R
         {children}
       </div>
       <AlertEngine />
-      <AlarmEngine />
+      <SafeBoundary><AlarmEngine /></SafeBoundary>
 
       {/* Mobile bottom navigation */}
       <nav
