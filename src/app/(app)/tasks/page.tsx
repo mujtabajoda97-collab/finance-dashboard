@@ -6,6 +6,9 @@ import { useApp } from '@/components/Providers';
 import { Sheet } from '@/components/Sheet';
 import { PriorityBadge } from '@/components/tasks/PriorityBadge';
 import { AlertPicker } from '@/components/AlertPicker';
+import { AlarmToggle } from '@/components/AlarmToggle';
+import { setAlarmFlag } from '@/lib/alarm';
+import { px } from '@/lib/ptext';
 import { choiceFromMinutes, minutesFromChoice, type AlertChoice } from '@/lib/alertPrefs';
 import { useData } from '@/lib/data';
 import { supabase } from '@/lib/supabase';
@@ -139,7 +142,7 @@ export default function TasksPage() {
                   title={T('editAlert')}
                   className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-brand-500/15 hover:text-brand-600 dark:text-night-muted dark:hover:text-brand-400"
                 >
-                  <Bell className="size-4" aria-hidden />
+                  <Bell className={`size-4 ${task.alarm_enabled ? 'fill-current text-brand-600 dark:text-brand-400' : ''}`} aria-hidden />
                 </button>
               </li>
             );
@@ -178,6 +181,7 @@ function AddTask({ onDone }: { onDone: () => Promise<void> }) {
   const [when, setWhen] = useState(() => toDubaiInput(new Date(Date.now() + 3600_000)));
   const [alert, setAlert] = useState<AlertChoice>(() => ({ mode: '1h', custom: toDubaiInput(new Date(Date.now() + 1800_000)) }));
   const [alertErr, setAlertErr] = useState(false);
+  const [alarm, setAlarm] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -189,11 +193,14 @@ function AddTask({ onDone }: { onDone: () => Promise<void> }) {
     if (minutes === null) { setAlertErr(true); return; }
     setAlertErr(false);
     setBusy(true);
-    const { error } = await supabase()
+    const { data: created, error } = await supabase()
       .from('tasks')
-      .insert({ title: title.trim(), priority, period_type: period, due_date: dueIso, remind_before_minutes: minutes });
+      .insert({ title: title.trim(), priority, period_type: period, due_date: dueIso, remind_before_minutes: minutes })
+      .select('id')
+      .single();
+    if (error) { setBusy(false); return notify(error.message, 'error'); }
+    if (alarm && created?.id && !(await setAlarmFlag('tasks', created.id as string, true))) notify(px(lang, 'alarmSaveFail'), 'error');
     setBusy(false);
-    if (error) return notify(error.message, 'error');
     await onDone();
   }
 
@@ -222,6 +229,7 @@ function AddTask({ onDone }: { onDone: () => Promise<void> }) {
         </label>
       </div>
       <AlertPicker value={alert} onChange={(v) => { setAlert(v); setAlertErr(false); }} error={alertErr} />
+      <AlarmToggle on={alarm} onChange={setAlarm} note={px(lang, 'alarmAtNote')} />
       <button type="submit" disabled={busy || !title.trim()} className="btn btn-primary w-full py-3">
         {busy && <Loader2 className="size-4 animate-spin" aria-hidden />} {T('add')}
       </button>
@@ -234,6 +242,7 @@ function EditAlert({ task, onDone }: { task: Task; onDone: () => Promise<void> }
   const T = (k: Parameters<typeof tx>[1]) => tx(lang, k);
   const due = task.due_date ? new Date(task.due_date) : null;
   const [choice, setChoice] = useState<AlertChoice>(() => choiceFromMinutes(task.remind_before_minutes, due));
+  const [alarm, setAlarm] = useState(!!task.alarm_enabled);
   const [err, setErr] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -243,8 +252,9 @@ function EditAlert({ task, onDone }: { task: Task; onDone: () => Promise<void> }
     if (minutes === null) { setErr(true); return; }
     setBusy(true);
     const { error } = await supabase().from('tasks').update({ remind_before_minutes: minutes }).eq('id', task.id);
+    if (error) { setBusy(false); return notify(error.message, 'error'); }
+    if (alarm !== !!task.alarm_enabled && !(await setAlarmFlag('tasks', task.id, alarm))) notify(px(lang, 'alarmSaveFail'), 'error');
     setBusy(false);
-    if (error) return notify(error.message, 'error');
     notify(T('alertSaved'));
     await onDone();
   }
@@ -254,6 +264,7 @@ function EditAlert({ task, onDone }: { task: Task; onDone: () => Promise<void> }
       <p className="font-semibold">{task.title}</p>
       {!due && <p className="text-sm text-amber-800 dark:text-amber-300">{T('alertNeedsDue')}</p>}
       <AlertPicker value={choice} onChange={(v) => { setChoice(v); setErr(false); }} disabled={!due} error={err} />
+      <AlarmToggle on={alarm} onChange={setAlarm} disabled={!due} note={px(lang, 'alarmAtNote')} />
       <button type="button" onClick={save} disabled={!due || busy} className="btn btn-primary w-full py-3">
         {busy && <Loader2 className="size-4 animate-spin" aria-hidden />} {T('save')}
       </button>

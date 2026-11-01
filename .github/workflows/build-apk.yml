@@ -38,6 +38,21 @@ jobs:
             npx cap add android
           fi
 
+      # Voice alarms: bundled alarm tone (res/raw/alarm.wav, used by the "lifeos-alarm" notification channel)
+      # and the permissions Android 12-14 needs for notifications and exact alarms. Idempotent.
+      - name: Install alarm tone and alarm permissions
+        run: |
+          mkdir -p android/app/src/main/res/raw
+          cp android-res/raw/alarm.wav android/app/src/main/res/raw/alarm.wav
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          for perm in POST_NOTIFICATIONS SCHEDULE_EXACT_ALARM USE_EXACT_ALARM VIBRATE WAKE_LOCK RECEIVE_BOOT_COMPLETED; do
+            if ! grep -q "android.permission.$perm\"" "$MANIFEST"; then
+              sed -i "s#</manifest>#    <uses-permission android:name=\"android.permission.$perm\" />\n</manifest>#" "$MANIFEST"
+            fi
+          done
+          grep -n "uses-permission" "$MANIFEST"
+          ls -la android/app/src/main/res/raw
+
       - name: Sync Capacitor config into Android
         run: npx cap sync android
 

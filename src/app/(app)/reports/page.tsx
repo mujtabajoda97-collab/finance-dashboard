@@ -10,6 +10,7 @@ import { formatMoney, toAED } from '@/lib/currency';
 import { startOfMonthDubai, APP_TZ, intlLocale } from '@/lib/time';
 import { startOfWeekDubai } from '@/lib/derived';
 import { tx } from '@/lib/text';
+import { SpendingBreakdown } from '@/components/reports/SpendingBreakdown';
 import type { Txn } from '@/lib/types';
 
 type Period = 'weekly' | 'monthly' | 'yearly';
@@ -169,6 +170,7 @@ export default function ReportsPage() {
           </div>
         </>
       )}
+      <SpendingBreakdown />
     </div>
   );
 }

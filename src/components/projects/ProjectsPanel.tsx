@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowDownCircle, ArrowUpCircle, Check, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowDownCircle, ArrowUpCircle, BellRing, Check, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useApp } from '../Providers';
 import { useData } from '@/lib/data';
 import { supabase } from '@/lib/supabase';
+import { setAlarmFlag } from '@/lib/alarm';
 import { formatMoney } from '@/lib/currency';
 import { todayDubai } from '@/lib/derived';
 import { flowPaid, flowRest, summarize } from '@/lib/projects';
@@ -28,6 +29,10 @@ export function ProjectsPanel() {
     const row = projectsV2 ? { is_done: done, paid_amount: done ? f.amount : 0 } : { is_done: done };
     const { error } = await supabase().from('project_cashflows').update(row).eq('id', f.id);
     if (error) return notify(error.message, 'error');
+    await loadProjects();
+  }
+  async function toggleAlarm(f: ProjectCashflow) {
+    if (!(await setAlarmFlag('project_cashflows', f.id, !f.alarm_enabled))) return notify(T('alarmSaveFail'), 'error');
     await loadProjects();
   }
   async function del(f: ProjectCashflow) {
@@ -176,6 +181,12 @@ export function ProjectsPanel() {
                           {formatMoney(done ? f.amount : rest, f.currency, lang)}
                           {!done && paid > 0 && <span className="block text-[10px] text-muted dark:text-night-muted">/ {formatMoney(f.amount, f.currency, lang)}</span>}
                         </span>
+                        {!done && f.due_date && (
+                          <button type="button" aria-label={f.alarm_enabled ? T('alarmOn') : T('alarmOff')} aria-pressed={!!f.alarm_enabled} title={T('alarmLabel')}
+                            className={`p-1 ${f.alarm_enabled ? 'text-brand-600 dark:text-brand-400' : 'text-muted dark:text-night-muted'}`} onClick={() => toggleAlarm(f)}>
+                            <BellRing className={`size-4 ${f.alarm_enabled ? 'fill-current' : ''}`} aria-hidden />
+                          </button>
+                        )}
                         <button type="button" aria-label={T('deleteProject')} className="p-1 text-muted dark:text-night-muted" onClick={() => del(f)}>
                           <Trash2 className="size-4" aria-hidden />
                         </button>

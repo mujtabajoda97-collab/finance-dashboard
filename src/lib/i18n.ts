@@ -90,6 +90,8 @@ const ar = {
   cat_RENT: 'إيجار',
   cat_SHOPPING: 'تسوق',
   cat_HEALTH: 'صحة',
+  cat_GROCERIES: 'مقاضي',
+  cat_PERSONAL: 'التزامات شخصية',
   cat_SALARY: 'راتب',
   cat_PROJECT: 'مشروع',
   // generic
@@ -262,6 +264,8 @@ const en: Record<DictKey, string> = {
   cat_RENT: 'Rent',
   cat_SHOPPING: 'Shopping',
   cat_HEALTH: 'Health',
+  cat_GROCERIES: 'Groceries',
+  cat_PERSONAL: 'Personal obligations',
   cat_SALARY: 'Salary',
   cat_PROJECT: 'Project',
   loading: 'Loading…',
@@ -347,5 +351,5 @@ const en: Record<DictKey, string> = {
 
 export const dictionaries: Record<Lang, Record<DictKey, string>> = { ar, en };
 
-export const EXPENSE_CATEGORIES = ['GENERAL', 'FOOD', 'TRANSPORT', 'BILLS', 'RENT', 'SHOPPING', 'HEALTH'] as const;
+export const EXPENSE_CATEGORIES = ['GENERAL', 'FOOD', 'GROCERIES', 'TRANSPORT', 'BILLS', 'RENT', 'PERSONAL', 'SHOPPING', 'HEALTH'] as const;
 export const INCOME_CATEGORIES = ['SALARY', 'PROJECT', 'GENERAL'] as const;

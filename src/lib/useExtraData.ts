@@ -30,8 +30,9 @@ export function useExtraData(enabled: boolean) {
         .order('due_date', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(500);
-    let res = await q(`${base},remind_before_minutes`);
-    // Column missing until SQL 0005 is applied: fall back to the basic columns.
+    // Columns missing until SQL 0005 / 0009 are applied: fall back step by step.
+    let res = await q(`${base},remind_before_minutes,alarm_enabled`);
+    if (res.error) res = await q(`${base},remind_before_minutes`);
     if (res.error) res = await q(base);
     if (res.error) throw res.error;
     const rows = (res.data ?? []) as unknown as Record<string, unknown>[];
@@ -43,16 +44,17 @@ export function useExtraData(enabled: boolean) {
   const loadProjects = useCallback(async () => {
     const pBase = 'id,name,budget,currency,allocated_amount,notes,is_archived,created_at';
     const cBase = 'id,project_id,direction,title,amount,currency,due_date,is_done,debt_id';
-    const run = (v2: boolean) =>
+    const run = (v2: boolean, alarm = false) =>
       Promise.all([
         supabase().from('projects').select(v2 ? `${pBase},target_date` : pBase)
           .eq('is_archived', false).order('created_at', { ascending: false }).limit(200),
-        supabase().from('project_cashflows').select(v2 ? `${cBase},paid_amount` : cBase)
+        supabase().from('project_cashflows').select(v2 ? `${cBase},paid_amount${alarm ? ',alarm_enabled' : ''}` : cBase)
           .order('due_date', { ascending: true, nullsFirst: false }).limit(2000),
       ]);
     let v2 = true;
-    let [p, c] = await run(true);
-    // New columns missing until SQL 0007 is applied: fall back to the basic columns.
+    let [p, c] = await run(true, true);
+    // New columns missing until SQL 0009 / 0007 are applied: fall back step by step.
+    if (p.error || c.error) [p, c] = await run(true);
     if (p.error || c.error) {
       v2 = false;
       [p, c] = await run(false);

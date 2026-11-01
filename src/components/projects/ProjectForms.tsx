@@ -5,6 +5,8 @@ import { Loader2 } from 'lucide-react';
 import { useApp } from '../Providers';
 import { useData } from '@/lib/data';
 import { Sheet } from '../Sheet';
+import { AlarmToggle } from '../AlarmToggle';
+import { setAlarmFlag } from '@/lib/alarm';
 import { supabase } from '@/lib/supabase';
 import { convert, parseAmount, round2, formatMoney } from '@/lib/currency';
 import { remaining } from '@/lib/debt';
@@ -98,6 +100,7 @@ export function FlowSheet({ project, direction, onClose }: { project: Project; d
   const [currency, setCurrency] = useState<Currency>(project.currency);
   const [due, setDue] = useState('');
   const [debtId, setDebtId] = useState('');
+  const [alarm, setAlarm] = useState(false);
   const [busy, setBusy] = useState(false);
   const wanted = direction === 'IN' ? 'RECEIVABLE' : 'PAYABLE';
   const linkable = debts.filter((d) => isOpenDebt(d) && d.type === wanted);
@@ -118,12 +121,13 @@ export function FlowSheet({ project, direction, onClose }: { project: Project; d
     e.preventDefault();
     if (!can) return;
     setBusy(true);
-    const { error } = await supabase().from('project_cashflows').insert({
+    const { data: created, error } = await supabase().from('project_cashflows').insert({
       project_id: project.id, direction, title: title.trim(), amount: round2(amount), currency,
       due_date: due || null, debt_id: debtId || null,
-    });
+    }).select('id').single();
+    if (error) { setBusy(false); return notify(error.message, 'error'); }
+    if (alarm && due && created?.id && !(await setAlarmFlag('project_cashflows', created.id as string, true))) notify(T('alarmSaveFail'), 'error');
     setBusy(false);
-    if (error) return notify(error.message, 'error');
     await loadProjects();
     onClose();
   }
@@ -152,6 +156,7 @@ export function FlowSheet({ project, direction, onClose }: { project: Project; d
         </div>
         <label className="block"><span className="label">{T('dueDate')}</span>
           <input type="date" dir="ltr" className="field num font-mono" value={due} onChange={(e) => setDue(e.target.value)} /></label>
+        <AlarmToggle on={alarm && !!due} onChange={setAlarm} disabled={!due} note={T('alarmFlowNote')} />
         <button type="submit" disabled={!can} className="btn btn-primary w-full py-3">
           {busy && <Loader2 className="size-4 animate-spin" aria-hidden />} {T('add')}
         </button>

@@ -1,11 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertTriangle, ArrowLeftRight, Bell, Check, ChevronDown, Plus, Wallet as WalletIcon } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Bell, Check, ChevronDown, Plus, CirclePlus, Wallet as WalletIcon } from 'lucide-react';
 import { useApp } from '@/components/Providers';
 import { Sheet } from '@/components/Sheet';
 import { PaymentForm } from '@/components/debts/PaymentForm';
 import { DebtForm } from '@/components/debts/DebtForm';
+import { IncreaseForm } from '@/components/debts/IncreaseForm';
+import { DebtHistory } from '@/components/debts/DebtHistory';
+import { AlarmToggle } from '@/components/AlarmToggle';
+import { setAlarmFlag } from '@/lib/alarm';
+import { px } from '@/lib/ptext';
 import { AlertPicker } from '@/components/AlertPicker';
 import { syncDebtReminder } from '@/lib/debtReminder';
 import { debtDueInstant, getDebtChoice, setDebtChoice, type AlertChoice } from '@/lib/alertPrefs';
@@ -24,6 +29,8 @@ export default function DebtsPage() {
   const data = useData();
   const [open, setOpen] = useState<string | null>(null);
   const [paying, setPaying] = useState<Debt | null>(null);
+  const [increasing, setIncreasing] = useState<Debt | null>(null);
+  const [histV, setHistV] = useState(0);
   const [adding, setAdding] = useState(false);
 
   const totals = (type: DebtType) => {
@@ -97,10 +104,16 @@ export default function DebtsPage() {
                     {d.notes && <p className="text-xs text-muted dark:text-night-muted">{d.notes}</p>}
                     {isOpenDebt(d) && d.due_date && <DebtAlert debt={d} />}
                     {isOpenDebt(d) && (
-                      <button type="button" className="btn btn-primary w-full" onClick={() => setPaying(d)}>
-                        <WalletIcon className="size-4" aria-hidden /> {T('recordPayment')}
-                      </button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button type="button" className="btn btn-primary" onClick={() => setPaying(d)}>
+                          <WalletIcon className="size-4" aria-hidden /> {T('recordPayment')}
+                        </button>
+                        <button type="button" className="btn border border-brand-500/60 text-brand-700 dark:text-brand-400" onClick={() => setIncreasing(d)}>
+                          <CirclePlus className="size-4" aria-hidden /> {px(lang, 'addToDebt')}
+                        </button>
+                      </div>
                     )}
+                    <DebtHistory debt={d} version={`${d.paid_amount}:${d.total_amount}:${histV}`} />
                   </div>
                 )}
               </li>
@@ -154,6 +167,15 @@ export default function DebtsPage() {
           <PaymentForm debt={paying} wallets={data.wallets} onDone={async () => { setPaying(null); await Promise.all([data.loadDebts(), data.refreshMoney(), data.loadAlerts()]); }} />
         </Sheet>
       )}
+      {increasing && (
+        <Sheet title={px(lang, 'increaseDebt')} onClose={() => setIncreasing(null)}>
+          <IncreaseForm debt={increasing} wallets={data.wallets} onDone={async () => {
+            setIncreasing(null);
+            setHistV((v) => v + 1);
+            await Promise.all([data.loadDebts(), data.refreshMoney(), data.loadAlerts(), data.loadReservations()]);
+          }} />
+        </Sheet>
+      )}
       {adding && (
         <Sheet title={T('addDebt')} onClose={() => setAdding(false)}>
           <DebtForm onDone={async () => { setAdding(false); await data.loadDebts(); }} />
@@ -169,8 +191,10 @@ function DebtAlert({ debt }: { debt: Debt }) {
   const dueAt = debtDueInstant(debt);
   const [choice, setChoice] = useState<AlertChoice>(() => getDebtChoice(debt.id, dueAt === null ? null : new Date(dueAt)));
   const [err, setErr] = useState(false);
+  const { loadDebts } = useData();
+  const [alarm, setAlarm] = useState(!!debt.alarm_enabled);
 
-  function save() {
+  async function save() {
     if (choice.mode === 'custom') {
       const at = fromDubaiInput(choice.custom);
       if (!at || dueAt === null || new Date(at).getTime() > dueAt) { setErr(true); return; }
@@ -178,6 +202,10 @@ function DebtAlert({ debt }: { debt: Debt }) {
     setErr(false);
     setDebtChoice(debt.id, choice);
     void syncDebtReminder(debt.id, choice, dueAt === null ? null : new Date(dueAt));
+    if (alarm !== !!debt.alarm_enabled) {
+      if (await setAlarmFlag('debts', debt.id, alarm)) await loadDebts();
+      else notify(px(lang, 'alarmSaveFail'), 'error');
+    }
     notify(T('alertSaved'));
   }
 
@@ -185,6 +213,7 @@ function DebtAlert({ debt }: { debt: Debt }) {
     <div className="space-y-2 rounded-2xl border border-line p-3 dark:border-night-line">
       <AlertPicker value={choice} onChange={(v) => { setChoice(v); setErr(false); }} error={err} />
       <p className="text-[11px] text-muted dark:text-night-muted">{T('alertDebtNote')}</p>
+      <AlarmToggle on={alarm} onChange={setAlarm} note={px(lang, 'alarmAtNote')} />
       <button type="button" onClick={save} className="btn w-full border border-line py-2 dark:border-night-line">{T('save')}</button>
     </div>
   );

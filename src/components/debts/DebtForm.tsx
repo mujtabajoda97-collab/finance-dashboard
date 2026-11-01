@@ -7,6 +7,9 @@ import { supabase } from '@/lib/supabase';
 import { parseAmount, round2 } from '@/lib/currency';
 import { tx } from '@/lib/text';
 import { AlertPicker } from '../AlertPicker';
+import { AlarmToggle } from '../AlarmToggle';
+import { setAlarmFlag } from '@/lib/alarm';
+import { px } from '@/lib/ptext';
 import { debtDueInstant, setDebtChoice, type AlertChoice } from '@/lib/alertPrefs';
 import { syncDebtReminder } from '@/lib/debtReminder';
 import { fromDubaiInput, toDubaiInput } from '@/lib/time';
@@ -24,6 +27,7 @@ export function DebtForm({ onDone }: { onDone: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [alert, setAlert] = useState<AlertChoice>(() => ({ mode: '24h', custom: toDubaiInput(new Date(Date.now() + 3600_000)) }));
   const [alertErr, setAlertErr] = useState(false);
+  const [alarm, setAlarm] = useState(false);
   const total = parseAmount(raw);
   const can = person.trim() !== '' && total > 0 && !busy;
 
@@ -51,6 +55,7 @@ export function DebtForm({ onDone }: { onDone: () => Promise<void> }) {
       setDebtChoice(created.id as string, alert);
       const dueAt = debtDueInstant({ due_date: due } as Parameters<typeof debtDueInstant>[0]);
       await syncDebtReminder(created.id as string, alert, dueAt === null ? null : new Date(dueAt));
+      if (alarm && !(await setAlarmFlag('debts', created.id as string, true))) notify(px(lang, 'alarmSaveFail'), 'error');
     }
     await onDone();
   }
@@ -75,6 +80,7 @@ export function DebtForm({ onDone }: { onDone: () => Promise<void> }) {
         <input type="date" dir="ltr" className="field num font-mono" value={due} onChange={(e) => setDue(e.target.value)} /></label>
       <AlertPicker value={alert} onChange={(v) => { setAlert(v); setAlertErr(false); }} disabled={!due} error={alertErr} />
       <p className="-mt-1 text-xs text-muted dark:text-night-muted">{due ? T('alertDebtNote') : T('alertNeedsDue')}</p>
+      <AlarmToggle on={alarm && !!due} onChange={setAlarm} disabled={!due} note={px(lang, 'alarmAtNote')} />
       <label className="block"><span className="label">{T('notes')}</span>
         <input className="field" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
       <button type="submit" disabled={!can} className="btn btn-primary w-full py-3">

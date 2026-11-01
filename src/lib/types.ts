@@ -37,6 +37,8 @@ export interface Task {
   completed_at: string | null;
   last_notified_at: string | null;
   created_at: string;
+  /** Voice alarm switch. Present only after SQL 0009. */
+  alarm_enabled?: boolean;
 }
 
 export interface Txn {
@@ -75,6 +77,20 @@ export interface Debt {
   created_at: string;
   /** Present only after SQL 0005 has been applied. */
   remind_before_minutes?: number;
+  /** Voice alarm switch. Present only after SQL 0009. */
+  alarm_enabled?: boolean;
+}
+
+/** One entry of a debt's history added by SQL 0009 (instalments live in debt_payments). */
+export interface DebtEvent {
+  id: string;
+  debt_id: string;
+  kind: 'INCREASE';
+  amount: number;
+  total_before: number;
+  total_after: number;
+  note: string | null;
+  created_at: string;
 }
 
 export interface AlertLog {
@@ -123,6 +139,8 @@ export interface ProjectCashflow {
   debt_id: string | null;
   /** Amount already paid / received (partial payments). Present only after SQL 0007. */
   paid_amount?: number;
+  /** Voice alarm switch. Present only after SQL 0009. */
+  alarm_enabled?: boolean;
 }
 
 /** Money reserved for a project inside a wallet. Present only after SQL 0008. */
