@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from './supabase';
 import { reservedByWallet } from './reserve';
-import type { AlertLog, Debt, FundReservation, Profile, Project, ProjectCashflow, RatePoint } from './types';
+import type { AlertLog, Debt, FundReservation, PendingInflow, Profile, Project, ProjectCashflow, RatePoint } from './types';
 
 /** Debts, alert log, profile and 7-day rate history. Each part fails on its own without breaking the app. */
 export function useExtraData(enabled: boolean) {
@@ -20,6 +20,9 @@ export function useExtraData(enabled: boolean) {
   const [reservations, setReservations] = useState<FundReservation[]>([]);
   /** true once SQL 0008 (fund_reservations, debt_pay, project_spend) is applied. */
   const [reservationsReady, setReservationsReady] = useState(false);
+  const [pending, setPending] = useState<PendingInflow[]>([]);
+  /** true once SQL 0010 (pending_inflows, receive_pending_inflow) is applied. */
+  const [pendingReady, setPendingReady] = useState(false);
   const reserved = useMemo(() => reservedByWallet(reservations), [reservations]);
   const [extraError, setExtraError] = useState<string | null>(null);
 
@@ -88,6 +91,23 @@ export function useExtraData(enabled: boolean) {
     setReservations(rows.map((r) => ({ ...r, amount: Number(r.amount), project_amount: Number(r.project_amount) })) as unknown as FundReservation[]);
   }, []);
 
+  const loadPending = useCallback(async () => {
+    const { data, error } = await supabase()
+      .from('pending_inflows')
+      .select('id,amount,currency,description,due_date,status,received_wallet_id,received_at,project_id,created_at')
+      .order('due_date', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (error) { // table missing until SQL 0010 is applied: fail-soft
+      setPendingReady(false);
+      setPending([]);
+      return;
+    }
+    setPendingReady(true);
+    const rows = (data ?? []) as unknown as Record<string, unknown>[];
+    setPending(rows.map((r) => ({ ...r, amount: Number(r.amount) })) as unknown as PendingInflow[]);
+  }, []);
+
   const loadAlerts = useCallback(async () => {
     const { data, error } = await supabase()
       .from('alert_logs')
@@ -122,14 +142,14 @@ export function useExtraData(enabled: boolean) {
   }, []);
 
   const loadExtra = useCallback(async () => {
-    const results = await Promise.allSettled([loadDebts(), loadAlerts(), loadProfile(), loadRateHistory(), loadProjects(), loadReservations()]);
+    const results = await Promise.allSettled([loadDebts(), loadAlerts(), loadProfile(), loadRateHistory(), loadProjects(), loadReservations(), loadPending()]);
     const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
     setExtraError(failed ? String(failed.reason?.message ?? failed.reason) : null);
-  }, [loadDebts, loadAlerts, loadProfile, loadRateHistory, loadProjects, loadReservations]);
+  }, [loadDebts, loadAlerts, loadProfile, loadRateHistory, loadProjects, loadReservations, loadPending]);
 
   useEffect(() => {
     if (enabled) loadExtra();
   }, [enabled, loadExtra]);
 
-  return { debts, alerts, profile, rateHistory, projects, cashflows, projectsReady, projectsV2, loadProjects, reservations, reservationsReady, reserved, loadReservations, extraError, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadExtra };
+  return { debts, alerts, profile, rateHistory, projects, cashflows, projectsReady, projectsV2, loadProjects, reservations, reservationsReady, reserved, loadReservations, pending, pendingReady, loadPending, extraError, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadExtra };
 }

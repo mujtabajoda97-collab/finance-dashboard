@@ -32,6 +32,11 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      # Optional fingerprint / screen-lock sign-in. Non-fatal: if the plugin cannot be installed
+      # the APK is still built and the app simply hides the biometric option.
+      - name: Install biometric plugin (optional)
+        run: npm install --no-save --no-audit --no-fund capacitor-native-biometric@4 || echo "biometric plugin not installed; continuing without it"
+
       - name: Create the Android project (first run only)
         run: |
           if [ ! -d android ]; then
@@ -45,7 +50,7 @@ jobs:
           mkdir -p android/app/src/main/res/raw
           cp android-res/raw/alarm.wav android/app/src/main/res/raw/alarm.wav
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          for perm in POST_NOTIFICATIONS SCHEDULE_EXACT_ALARM USE_EXACT_ALARM VIBRATE WAKE_LOCK RECEIVE_BOOT_COMPLETED; do
+          for perm in POST_NOTIFICATIONS SCHEDULE_EXACT_ALARM USE_EXACT_ALARM VIBRATE WAKE_LOCK RECEIVE_BOOT_COMPLETED USE_BIOMETRIC USE_FINGERPRINT; do
             if ! grep -q "android.permission.$perm\"" "$MANIFEST"; then
               sed -i "s#</manifest>#    <uses-permission android:name=\"android.permission.$perm\" />\n</manifest>#" "$MANIFEST"
             fi

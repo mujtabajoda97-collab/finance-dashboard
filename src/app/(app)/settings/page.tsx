@@ -7,6 +7,7 @@ import { useData } from '@/lib/data';
 import { supabase } from '@/lib/supabase';
 import { px as tx, type AnyKey as TKey } from '@/lib/ptext';
 import { DangerZone } from '@/components/settings/DangerZone';
+import { BiometricSettings } from '@/components/settings/BiometricSettings';
 import { AlarmSettings } from '@/components/settings/AlarmSettings';
 import { SafeBoundary } from '@/components/SafeBoundary';
 import { notifPermission, notifSupported, requestNotifPermission, sendWhatsApp, showLocalNotification } from '@/lib/notify';
@@ -171,6 +172,8 @@ export default function SettingsPage() {
       </section>
 
       <SafeBoundary><AlarmSettings /></SafeBoundary>
+
+      <SafeBoundary><BiometricSettings /></SafeBoundary>
 
       <section className="card space-y-4">
         <h2 className="text-base font-bold">{T('alertTypes')}</h2>

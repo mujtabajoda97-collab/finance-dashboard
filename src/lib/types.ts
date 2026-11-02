@@ -154,3 +154,17 @@ export interface FundReservation {
   project_amount: number;
   created_at: string;
 }
+
+/** Expected money that has not arrived yet. Present only after SQL 0010. */
+export interface PendingInflow {
+  id: string;
+  amount: number;
+  currency: Currency;
+  description: string;
+  due_date: string | null;
+  status: 'PENDING' | 'RECEIVED';
+  received_wallet_id: string | null;
+  received_at: string | null;
+  project_id: string | null;
+  created_at: string;
+}
