@@ -6,6 +6,9 @@ import { useApp } from '@/components/Providers';
 import { Sheet } from '@/components/Sheet';
 import { PriorityBadge } from '@/components/tasks/PriorityBadge';
 import { AlertPicker } from '@/components/AlertPicker';
+import { RecipientField } from '@/components/RecipientField';
+import { emptyRecipient, getRecipient, recipientError, setRecipient, suggestedText, type Recipient } from '@/lib/recipient';
+import { p2 } from '@/lib/ptext2';
 import { AlarmToggle } from '@/components/AlarmToggle';
 import { setAlarmFlag } from '@/lib/alarm';
 import { px } from '@/lib/ptext';
@@ -182,11 +185,15 @@ function AddTask({ onDone }: { onDone: () => Promise<void> }) {
   const [alert, setAlert] = useState<AlertChoice>(() => ({ mode: '1h', custom: toDubaiInput(new Date(Date.now() + 1800_000)) }));
   const [alertErr, setAlertErr] = useState(false);
   const [alarm, setAlarm] = useState(false);
+  const [rec, setRec] = useState<Recipient>(emptyRecipient);
   const [busy, setBusy] = useState(false);
+  const suggested = suggestedText('task', lang, { name: rec.name, title });
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim() || busy) return;
+    const recErr = recipientError(rec);
+    if (recErr) return notify(p2(lang, recErr), 'error');
     const dueIso = fromDubaiInput(when);
     if (!dueIso) return notify(T('alertNeedsDue'), 'error');
     const minutes = minutesFromChoice(alert, new Date(dueIso));
@@ -199,6 +206,7 @@ function AddTask({ onDone }: { onDone: () => Promise<void> }) {
       .select('id')
       .single();
     if (error) { setBusy(false); return notify(error.message, 'error'); }
+    if (created?.id) setRecipient('task', created.id as string, rec);
     if (alarm && created?.id && !(await setAlarmFlag('tasks', created.id as string, true))) notify(px(lang, 'alarmSaveFail'), 'error');
     setBusy(false);
     await onDone();
@@ -229,6 +237,7 @@ function AddTask({ onDone }: { onDone: () => Promise<void> }) {
         </label>
       </div>
       <AlertPicker value={alert} onChange={(v) => { setAlert(v); setAlertErr(false); }} error={alertErr} />
+      <RecipientField value={rec} onChange={setRec} suggested={suggested} />
       <AlarmToggle on={alarm} onChange={setAlarm} note={px(lang, 'alarmAtNote')} />
       <button type="submit" disabled={busy || !title.trim()} className="btn btn-primary w-full py-3">
         {busy && <Loader2 className="size-4 animate-spin" aria-hidden />} {T('add')}
@@ -243,17 +252,23 @@ function EditAlert({ task, onDone }: { task: Task; onDone: () => Promise<void> }
   const due = task.due_date ? new Date(task.due_date) : null;
   const [choice, setChoice] = useState<AlertChoice>(() => choiceFromMinutes(task.remind_before_minutes, due));
   const [alarm, setAlarm] = useState(!!task.alarm_enabled);
+  const [rec, setRec] = useState<Recipient>(() => getRecipient('task', task.id));
   const [err, setErr] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  const suggested = suggestedText('task', lang, { name: rec.name, title: task.title });
+
   async function save() {
     if (!due || busy) return;
+    const recErr = recipientError(rec);
+    if (recErr) return notify(p2(lang, recErr), 'error');
     const minutes = minutesFromChoice(choice, due);
     if (minutes === null) { setErr(true); return; }
     setBusy(true);
     const { error } = await supabase().from('tasks').update({ remind_before_minutes: minutes }).eq('id', task.id);
     if (error) { setBusy(false); return notify(error.message, 'error'); }
     if (alarm !== !!task.alarm_enabled && !(await setAlarmFlag('tasks', task.id, alarm))) notify(px(lang, 'alarmSaveFail'), 'error');
+    setRecipient('task', task.id, rec);
     setBusy(false);
     notify(T('alertSaved'));
     await onDone();
@@ -264,6 +279,7 @@ function EditAlert({ task, onDone }: { task: Task; onDone: () => Promise<void> }
       <p className="font-semibold">{task.title}</p>
       {!due && <p className="text-sm text-amber-800 dark:text-amber-300">{T('alertNeedsDue')}</p>}
       <AlertPicker value={choice} onChange={(v) => { setChoice(v); setErr(false); }} disabled={!due} error={err} />
+      <RecipientField value={rec} onChange={setRec} suggested={suggested} disabled={!due} />
       <AlarmToggle on={alarm} onChange={setAlarm} disabled={!due} note={px(lang, 'alarmAtNote')} />
       <button type="button" onClick={save} disabled={!due || busy} className="btn btn-primary w-full py-3">
         {busy && <Loader2 className="size-4 animate-spin" aria-hidden />} {T('save')}

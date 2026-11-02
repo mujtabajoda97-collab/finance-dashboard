@@ -10,6 +10,7 @@ import { APP_TZ, dubaiTimeToday, intlLocale } from '@/lib/time';
 import { formatMoney } from '@/lib/currency';
 import { tx } from '@/lib/text';
 import { p2 as px } from '@/lib/ptext2';
+import { normalizePhone, readRecipients, type Recipient } from '@/lib/recipient';
 import type { Task } from '@/lib/types';
 
 const TICK_MS = 30_000;
@@ -67,6 +68,31 @@ export function AlertEngine() {
           } else retryAt.current[waKey] = now + 5 * 60_000; // try again in 5 minutes
         }
       }
+      /**
+       * A reminder the owner wants sent to someone else: the exact text they wrote goes to that number.
+       * The owner still gets the normal on-device notification. Needs "automatic WhatsApp" switched on.
+       */
+      const autoWa = readFlag('auto_wa', false);
+      const recs = readRecipients();
+      const otherOf = (kind: 'task' | 'debt', id: string): Recipient | null => {
+        const r = recs[`${kind}:${id}`];
+        return r && r.on && r.text.trim() && normalizePhone(r.phone) ? r : null;
+      };
+      const otherPending = (key: string) => !wasFired(key) || (autoWa && !wasFired(`wa:other:${key}`));
+      async function raiseOther(key: string, rec: Recipient, title: string, body: string, url: string) {
+        if (!wasFired(key)) {
+          markFired(key);
+          notify(`${title}: ${body}`, 'warning');
+          await showLocalNotification(title, body, key, url);
+        }
+        const waKey = `wa:other:${key}`;
+        if (autoWa && !wasFired(waKey) && sends < MAX_SENDS_PER_TICK && (retryAt.current[waKey] ?? 0) <= now) {
+          sends += 1;
+          const res = await sendWhatsApp(rec.text.trim(), rec.phone);
+          if (res.ok) markFired(waKey);
+          else retryAt.current[waKey] = now + 5 * 60_000;
+        }
+      }
       const raise = (key: string, title: string, body: string, url: string) => raiseGroup(key, [key], title, body, url);
 
       if (remindersOn) {
@@ -77,6 +103,11 @@ export function AlertEngine() {
           const at = taskFireAt(t);
           if (at === null || now < at || now - at > CATCH_UP_MS) continue;
           const key = `task:${t.id}:${at}`;
+          const other = otherOf('task', t.id);
+          if (other) {
+            if (otherPending(key)) await raiseOther(key, other, T('msgTask'), `${t.title}\n${T('msgDue')}: ${fmt.format(new Date(t.due_date as string))}`, '/tasks/');
+            continue;
+          }
           if (!wasFired(key) || (waOn && !wasFired(`wa:${key}`))) dueTasks.push({ key, t });
         }
         if (dueTasks.length === 1) {
@@ -92,7 +123,12 @@ export function AlertEngine() {
           if (!isOpenDebtDue(d)) continue;
           const at = debtFireAt(d);
           if (at === null || now < at || now - at > CATCH_UP_MS) continue;
-          await raise(`debt:${d.id}:${at}`, T('msgDebt'), `${d.person_name} — ${formatMoney(d.total_amount - d.paid_amount, d.currency, lg)}\n${T('msgDue')}: ${d.due_date}`, '/debts/');
+          const dKey = `debt:${d.id}:${at}`;
+          const dTitle = T('msgDebt');
+          const dBody = `${d.person_name} — ${formatMoney(d.total_amount - d.paid_amount, d.currency, lg)}\n${T('msgDue')}: ${d.due_date}`;
+          const other = otherOf('debt', d.id);
+          if (other) await raiseOther(dKey, other, dTitle, dBody, '/debts/');
+          else await raise(dKey, dTitle, dBody, '/debts/');
         }
       }
 

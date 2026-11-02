@@ -32,8 +32,8 @@ export async function showLocalNotification(title: string, body: string, tag: st
   }
 }
 
-/** Sends a WhatsApp message to the number saved in the signed-in user's profile (server route + Green API). */
-export async function sendWhatsApp(text: string): Promise<{ ok: boolean; error?: string }> {
+/** Sends a WhatsApp message to the number saved in the signed-in user's profile, or to `to` when given (server route + Green API). */
+export async function sendWhatsApp(text: string, to?: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const { data } = await supabase().auth.getSession();
     const token = data.session?.access_token;
@@ -41,7 +41,7 @@ export async function sendWhatsApp(text: string): Promise<{ ok: boolean; error?:
     const res = await fetch('/api/whatsapp/', {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(to ? { text, to } : { text }),
     });
     const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
     return res.ok && body.ok ? { ok: true } : { ok: false, error: body.error ?? `http-${res.status}` };

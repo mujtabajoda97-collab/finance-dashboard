@@ -4,10 +4,13 @@ import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useApp } from '../Providers';
 import { supabase } from '@/lib/supabase';
-import { parseAmount, round2 } from '@/lib/currency';
+import { formatMoney, parseAmount, round2 } from '@/lib/currency';
 import { tx } from '@/lib/text';
 import { AlertPicker } from '../AlertPicker';
 import { AlarmToggle } from '../AlarmToggle';
+import { RecipientField } from '../RecipientField';
+import { emptyRecipient, recipientError, setRecipient, suggestedText, type Recipient } from '@/lib/recipient';
+import { p2 } from '@/lib/ptext2';
 import { setAlarmFlag } from '@/lib/alarm';
 import { px } from '@/lib/ptext';
 import { debtDueInstant, setDebtChoice, type AlertChoice } from '@/lib/alertPrefs';
@@ -28,12 +31,17 @@ export function DebtForm({ onDone }: { onDone: () => Promise<void> }) {
   const [alert, setAlert] = useState<AlertChoice>(() => ({ mode: '24h', custom: toDubaiInput(new Date(Date.now() + 3600_000)) }));
   const [alertErr, setAlertErr] = useState(false);
   const [alarm, setAlarm] = useState(false);
+  const [rec, setRec] = useState<Recipient>(emptyRecipient);
   const total = parseAmount(raw);
   const can = person.trim() !== '' && total > 0 && !busy;
+  const recName = rec.name.trim() || person.trim();
+  const suggested = suggestedText('debt', lang, { name: recName, amount: total > 0 ? formatMoney(total, currency, lang) : '' });
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!can) return;
+    const recErr = due ? recipientError(rec) : null;
+    if (recErr) return notify(p2(lang, recErr), 'error');
     if (due && alert.mode === 'custom') {
       const at = fromDubaiInput(alert.custom);
       const dueAt = debtDueInstant({ due_date: due } as Parameters<typeof debtDueInstant>[0]);
@@ -53,6 +61,7 @@ export function DebtForm({ onDone }: { onDone: () => Promise<void> }) {
     if (error) return notify(error.message, 'error');
     if (created?.id && due) {
       setDebtChoice(created.id as string, alert);
+      setRecipient('debt', created.id as string, { ...rec, name: recName });
       const dueAt = debtDueInstant({ due_date: due } as Parameters<typeof debtDueInstant>[0]);
       await syncDebtReminder(created.id as string, alert, dueAt === null ? null : new Date(dueAt));
       if (alarm && !(await setAlarmFlag('debts', created.id as string, true))) notify(px(lang, 'alarmSaveFail'), 'error');
@@ -80,6 +89,7 @@ export function DebtForm({ onDone }: { onDone: () => Promise<void> }) {
         <input type="date" dir="ltr" className="field num font-mono" value={due} onChange={(e) => setDue(e.target.value)} /></label>
       <AlertPicker value={alert} onChange={(v) => { setAlert(v); setAlertErr(false); }} disabled={!due} error={alertErr} />
       <p className="-mt-1 text-xs text-muted dark:text-night-muted">{due ? T('alertDebtNote') : T('alertNeedsDue')}</p>
+      <RecipientField value={rec} onChange={setRec} suggested={suggested} defaultName={person.trim()} disabled={!due} />
       <AlarmToggle on={alarm && !!due} onChange={setAlarm} disabled={!due} note={px(lang, 'alarmAtNote')} />
       <label className="block"><span className="label">{T('notes')}</span>
         <input className="field" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>

@@ -21,7 +21,7 @@ interface ProfileRow {
 }
 
 /**
- * POST { text } with `Authorization: Bearer <supabase access token>`.
+ * POST { text, to? } with `Authorization: Bearer <supabase access token>`.
  * Uses the Green API instance, token and WhatsApp number saved in the CALLER'S OWN profile
  * (row-level security guarantees nobody can read or use another user's keys).
  */
@@ -35,9 +35,11 @@ export async function POST(req: Request) {
   if (!sbUrl || !sbKey) return NextResponse.json({ ok: false, error: 'supabase-not-configured' }, { status: 503 });
 
   let text = '';
+  let toRaw = '';
   try {
-    const body = (await req.json()) as { text?: unknown };
+    const body = (await req.json()) as { text?: unknown; to?: unknown };
     text = typeof body.text === 'string' ? body.text.trim().slice(0, MAX_TEXT) : '';
+    toRaw = typeof body.to === 'string' ? body.to : '';
   } catch {
     return NextResponse.json({ ok: false, error: 'bad-request' }, { status: 400 });
   }
@@ -65,8 +67,9 @@ export async function POST(req: Request) {
   if (!/^\d{4,15}$/.test(instance) || !/^[A-Za-z0-9]{16,128}$/.test(apiToken)) {
     return NextResponse.json({ ok: false, error: 'green-invalid-keys' }, { status: 400 });
   }
-  const phone = row?.whatsapp_phone ? digitsOf(row.whatsapp_phone) : null;
-  if (!phone) return NextResponse.json({ ok: false, error: 'no-phone' }, { status: 400 });
+  // `to` = another recipient chosen by the owner for one reminder; otherwise the owner's own saved number.
+  const phone = toRaw ? digitsOf(toRaw) : row?.whatsapp_phone ? digitsOf(row.whatsapp_phone) : null;
+  if (!phone) return NextResponse.json({ ok: false, error: toRaw ? 'bad-recipient' : 'no-phone' }, { status: 400 });
 
   const host = `https://${instance.slice(0, 4)}.api.greenapi.com`;
   try {
