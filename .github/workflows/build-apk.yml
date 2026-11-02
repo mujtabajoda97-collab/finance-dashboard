@@ -32,10 +32,11 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      # Optional fingerprint / screen-lock sign-in. Non-fatal: if the plugin cannot be installed
-      # the APK is still built and the app simply hides the biometric option.
+      # Fingerprint / screen-lock plugin. It MUST be saved to package.json (--save): `cap sync` only picks up
+      # plugins listed there (a --no-save install was silently ignored). Non-fatal: if it cannot be installed
+      # the APK is still built and the app simply hides the app-lock option.
       - name: Install biometric plugin (optional)
-        run: npm install --no-save --no-audit --no-fund capacitor-native-biometric@4 || echo "biometric plugin not installed; continuing without it"
+        run: npm install --save --no-audit --no-fund @capgo/capacitor-native-biometric@6 || echo "biometric plugin not installed; continuing without it"
 
       - name: Create the Android project (first run only)
         run: |
@@ -59,7 +60,10 @@ jobs:
           ls -la android/app/src/main/res/raw
 
       - name: Sync Capacitor config into Android
-        run: npx cap sync android
+        run: |
+          npx cap sync android
+          echo "--- Capacitor plugins found ---"
+          npx cap ls android || true
 
       - name: Build debug APK
         working-directory: android

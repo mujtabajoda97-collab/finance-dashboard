@@ -3,67 +3,57 @@
 import { useEffect, useState } from 'react';
 import { Fingerprint, Loader2 } from 'lucide-react';
 import { useApp } from '../Providers';
-import { useData } from '@/lib/data';
-import { supabase } from '@/lib/supabase';
-import { biometricAvailable, biometricEnabled, disableBiometric, enableBiometric } from '@/lib/biometric';
-import { px as tx } from '@/lib/ptext';
+import { lockAvailable, lockEnabled, lockSupported, promptUnlock, setLockEnabled } from '@/lib/biometric';
+import { p2 as tx } from '@/lib/ptext2';
 
-/** Optional fingerprint / screen-lock sign-in (Android app only). */
+/** App lock switch: fingerprint or phone PIN / pattern at every open (Android app only). */
 export function BiometricSettings() {
   const { lang, notify } = useApp();
-  const { email } = useData();
   const T = (k: Parameters<typeof tx>[1]) => tx(lang, k);
-  const [available, setAvailable] = useState<boolean | null>(null);
+  const [state, setState] = useState<'checking' | 'nosupport' | 'nolock' | 'ready'>('checking');
   const [on, setOn] = useState(false);
-  const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    biometricAvailable().then((a) => { if (alive) { setAvailable(a); setOn(biometricEnabled()); } });
+    (async () => {
+      if (!lockSupported()) { if (alive) setState('nosupport'); return; }
+      const ok = await lockAvailable();
+      if (!alive) return;
+      setOn(lockEnabled());
+      setState(ok ? 'ready' : 'nolock');
+    })();
     return () => { alive = false; };
   }, []);
 
-  async function enable(e: React.FormEvent) {
-    e.preventDefault();
-    if (busy || !pw) return;
+  async function toggle() {
+    if (busy) return;
     setBusy(true);
-    try {
-      // Confirm the password is right before storing it.
-      const { error } = await supabase().auth.signInWithPassword({ email, password: pw });
-      if (error) { notify(T('loginBad'), 'error'); return; }
-      await enableBiometric(email, pw, T('bioTitle'));
-      setOn(true);
-      setPw('');
-      notify(T('bioEnabled'));
-    } catch {
-      notify(T('bioFail'), 'error');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function disable() {
-    await disableBiometric();
-    setOn(false);
-    notify(T('bioDisabled'));
+    // Turning it on or off both need a successful fingerprint / PIN first.
+    const ok = await promptUnlock(T('lockTitle'), T('lockPrompt'));
+    setBusy(false);
+    if (!ok) return notify(T('lockFail'), 'error');
+    const next = !on;
+    setLockEnabled(next);
+    setOn(next);
+    notify(T(next ? 'lockEnabledMsg' : 'lockDisabledMsg'));
   }
 
   return (
     <section className="card space-y-3">
-      <h2 className="flex items-center gap-2 text-base font-bold"><Fingerprint className="size-5 text-brand-700 dark:text-brand-400" aria-hidden />{T('bioTitle')}</h2>
-      {available === null ? null : !available ? (
+      <h2 className="flex items-center gap-2 text-base font-bold"><Fingerprint className="size-5 text-brand-700 dark:text-brand-400" aria-hidden />{T('lockTitle')}</h2>
+      {state === 'checking' ? null : state === 'nosupport' ? (
         <p className="text-sm text-muted dark:text-night-muted">{T('bioUnavailable')}</p>
-      ) : on ? (
-        <button type="button" onClick={disable} className="btn w-full border border-line dark:border-night-line">{T('bioDisable')}</button>
+      ) : state === 'nolock' ? (
+        <p className="text-sm text-amber-800 dark:text-amber-300">{T('lockNoScreenLock')}</p>
       ) : (
-        <form onSubmit={enable} className="space-y-3">
-          <p className="text-sm text-muted dark:text-night-muted">{T('bioNote')}</p>
-          <input type="password" className="field" dir="ltr" autoComplete="current-password" placeholder={T('bioNeedPw')} value={pw} onChange={(e) => setPw(e.target.value)} />
-          <button type="submit" disabled={busy || !pw} className="btn btn-primary w-full">
-            {busy && <Loader2 className="size-4 animate-spin" aria-hidden />} {T('bioEnable')}
+        <>
+          <p className="text-sm text-muted dark:text-night-muted">{T('lockNote')}</p>
+          {on && <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">{T('lockOn')}</p>}
+          <button type="button" onClick={toggle} disabled={busy} className={`btn w-full ${on ? 'border border-line dark:border-night-line' : 'btn-primary'}`}>
+            {busy && <Loader2 className="size-4 animate-spin" aria-hidden />} {T(on ? 'lockDisable' : 'lockEnable')}
           </button>
-        </form>
+        </>
       )}
     </section>
   );

@@ -10,8 +10,8 @@ const SERVER = 'lifeos.restocloud';
 const FLAG = 'bio_enabled';
 
 interface BiometricApi {
-  isAvailable(): Promise<{ isAvailable: boolean }>;
-  verifyIdentity(o?: { reason?: string; title?: string; subtitle?: string; description?: string; negativeButtonText?: string }): Promise<unknown>;
+  isAvailable(o?: { useFallback?: boolean }): Promise<{ isAvailable: boolean }>;
+  verifyIdentity(o?: { reason?: string; title?: string; subtitle?: string; description?: string; negativeButtonText?: string; useFallback?: boolean }): Promise<unknown>;
   setCredentials(o: { username: string; password: string; server: string }): Promise<unknown>;
   getCredentials(o: { server: string }): Promise<{ username: string; password: string }>;
   deleteCredentials(o: { server: string }): Promise<unknown>;
@@ -76,5 +76,46 @@ export async function biometricCredentials(title: string): Promise<{ email: stri
     return c?.username && c?.password ? { email: c.username, password: c.password } : null;
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// App lock: ask for the fingerprint OR the phone screen lock (PIN / pattern) when the app opens
+// or comes back from the background. Only the on/off switch is stored (no secrets).
+// ---------------------------------------------------------------------------------------------
+const LOCK_FLAG = 'app_lock';
+
+export function lockEnabled(): boolean {
+  try { return localStorage.getItem(LOCK_FLAG) === '1'; } catch { return false; }
+}
+export function setLockEnabled(on: boolean): void {
+  try { if (on) localStorage.setItem(LOCK_FLAG, '1'); else localStorage.removeItem(LOCK_FLAG); } catch { /* not persisted */ }
+}
+
+/** True when the native plugin is present (Android app build that includes it). */
+export function lockSupported(): boolean {
+  return plugin() !== null;
+}
+
+/** True when the phone has a fingerprint or a screen lock the plugin can use. */
+export async function lockAvailable(): Promise<boolean> {
+  const p = plugin();
+  if (!p) return false;
+  try {
+    return !!(await p.isAvailable({ useFallback: true }))?.isAvailable;
+  } catch {
+    return false;
+  }
+}
+
+/** Shows the system prompt (fingerprint, falling back to the phone PIN / pattern). Resolves true only on success. */
+export async function promptUnlock(title: string, reason: string): Promise<boolean> {
+  const p = plugin();
+  if (!p) return false;
+  try {
+    await p.verifyIdentity({ title, reason, description: reason, useFallback: true });
+    return true;
+  } catch {
+    return false;
   }
 }

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useApp } from '@/components/Providers';
 import { AppShell } from '@/components/AppShell';
+import { AppLock } from '@/components/AppLock';
 import { SetupNotice } from '@/components/SetupNotice';
 import { DataProvider } from '@/lib/data';
 import { isSupabaseConfigured } from '@/lib/supabase';
@@ -32,7 +33,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <DataProvider session={session}>
-      <AppShell email={session.user.email ?? ''}>{children}</AppShell>
+      <AppLock>
+        <AppShell email={session.user.email ?? ''}>{children}</AppShell>
+      </AppLock>
     </DataProvider>
   );
 }
