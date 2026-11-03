@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
+import { sweep } from '@/lib/waEscalate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
+
 
 /**
  * Green API incoming-message webhook.
@@ -10,6 +12,7 @@ export const maxDuration = 30;
  *  - Needs env: GREEN_WEBHOOK_TOKEN, SUPABASE_SERVICE_ROLE_KEY (+ the public Supabase URL). GEMINI_API_KEY is optional (classification).
  * Matching is done through wa_outbox (SQL 0011): the sender must be a number the app itself wrote to.
  */
+const URGENT = /(عاجل|ضروري|مستعجل|حالاً|حالا|الآن|اليوم|urgent|asap|محامي|محكمة|شرطة|قضية|بلاغ)/i;
 const DONE = /^\s*(تم|تمام|نعم|ايوه|أيوه|اي|done|yes|ok|okay)\s*[.!۔]*\s*$/i;
 
 const url = () => process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
@@ -72,7 +75,7 @@ async function classify(text: string): Promise<{ category: string; summary: stri
 
 async function reply(userId: string, to: string, message: string) {
   const prof = await rest<{ green_api_id_instance: string | null; green_api_token_instance: string | null }[]>(
-    `profiles?select=green_api_id_instance,green_api_token_instance&id=eq.${userId}&limit=1`,
+    `profiles?select=green_api_id_instance,green_api_token_instance&user_id=eq.${userId}&limit=1`,
   );
   const inst = (prof?.[0]?.green_api_id_instance ?? '').trim();
   const tok = (prof?.[0]?.green_api_token_instance ?? '').trim();
@@ -94,6 +97,9 @@ export async function POST(req: Request) {
   if (!expected || !svc() || !url()) return NextResponse.json({ ok: false, error: 'not-configured' }, { status: 503 });
   const got = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
   if (got !== expected) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+
+  // Every webhook event is also a chance to escalate important replies the owner has not handled in time.
+  try { await sweep(); } catch { /* never block the webhook */ }
 
   let body: any;
   try { body = await req.json(); } catch { return NextResponse.json({ ok: false }, { status: 400 }); }
@@ -129,11 +135,18 @@ export async function POST(req: Request) {
   const debtId = m.ref_ids[0];
   if (!debtId || !/^[0-9a-f-]{36}$/i.test(debtId)) return NextResponse.json({ ok: true });
   const c = await classify(text);
-  await rest('wa_inbox', {
-    method: 'POST',
-    headers: { prefer: 'resolution=ignore-duplicates,return=minimal' },
-    body: JSON.stringify({ user_id: m.user_id, debt_id: debtId, msg_id: msgId || null, from_phone: sender, body: text, ...c }),
-  });
+  const important = c.category !== 'OTHER' || URGENT.test(text);
+  const row = { user_id: m.user_id, debt_id: debtId, msg_id: msgId || null, from_phone: sender, body: text, ...c };
+  // `important` exists only after SQL 0012: fall back to the old shape so replies are never lost.
+  const post = async (payload: object) => {
+    try {
+      const r = await fetch(`${url()}/rest/v1/wa_inbox`, { method: 'POST', headers: { ...H(), prefer: 'resolution=ignore-duplicates,return=minimal' }, body: JSON.stringify(payload), cache: 'no-store' });
+      return r.ok;
+    } catch {
+      return false;
+    }
+  };
+  if (!(await post({ ...row, important }))) await post(row);
   return NextResponse.json({ ok: true, stored: true, category: c.category });
 }
 

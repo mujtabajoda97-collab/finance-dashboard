@@ -17,6 +17,7 @@ const SYSTEM = `أنت «المساعد الذكي» داخل تطبيق «نظ�
 - سداد دين: {"type":"debt_payment","person":"اسم الشخص كما في الديون","amount":500,"wallet":"اسم المحفظة"}
 - إرسال رسالة واتساب لشخص: {"type":"send_message","person":"الاسم كما قاله المستخدم","message":"نص الرسالة الجاهز والودّي"}
 - اتصال هاتفي بشخص: {"type":"call","person":"الاسم كما قاله المستخدم"}
+- التواصل مع شخص دون تحديد الوسيلة (مثل «كلّم فلان» أو «تواصل مع فلان»): {"type":"contact","person":"الاسم"} وسيسأل التطبيق المستخدم: اتصال أم واتساب، ويعرض له الرقم.
 (لا تخترع رقم هاتف: التطبيق يبحث عن الاسم في جهات الاتصال ويعرض نافذة تأكيد بالاسم والرقم والنص، ولا يُرسل شيء قبل ضغط المستخدم «تأكيد». لا تقل إنك أرسلت أو اتصلت؛ قل إنك جهّزت الرسالة/الاتصال وإن عليه المراجعة والتأكيد.)
 فئات المصروف المسموحة: GENERAL, FOOD, GROCERIES, TRANSPORT, BILLS, RENT, PERSONAL, SHOPPING, HEALTH.
 اختر محفظة من قائمة المحافظ بنفس عملة العملية؛ «كاش» تعني محفظة اسمها يحتوي كاش/نقد إن وُجدت. إن كان الاختيار غامضاً فاترك wallet فارغاً واطلب التوضيح في reply.
@@ -46,7 +47,7 @@ const DEFAULT_MODEL: Record<Provider, string> = {
   // 2.5-flash is closed to new Google accounts; 3.8-flash is the model Google itself points new keys to.
   gemini: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
   openai: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-  anthropic: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-20241022',
+  anthropic: process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
 };
 const ENV_KEY: Record<Provider, string | undefined> = {
   gemini: process.env.GEMINI_API_KEY,

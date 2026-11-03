@@ -18,10 +18,11 @@ import { getAiKey, getAiModel, getProvider } from '@/lib/assistantKey';
 import { recordSpeech, transcribe, whisperAvailable, type RecSession } from '@/lib/recorder';
 import { VoiceWaves } from './VoiceWaves';
 import { ContactConfirm, type ContactRequest } from './ContactConfirm';
+import { ensureContactsPermission } from '@/lib/contacts';
 import type { Currency, Debt, Wallet } from '@/lib/types';
 
-interface Action { type: 'expense' | 'income' | 'debt_payment' | 'send_message' | 'call'; amount?: number; wallet?: string; category?: string; notes?: string; person?: string; message?: string }
-const isContactAction = (a: Action) => a.type === 'send_message' || a.type === 'call';
+interface Action { type: 'expense' | 'income' | 'debt_payment' | 'send_message' | 'call' | 'contact'; amount?: number; wallet?: string; category?: string; notes?: string; person?: string; message?: string }
+const isContactAction = (a: Action) => a.type === 'send_message' || a.type === 'call' || a.type === 'contact';
 const YES = ['نعم', 'ايوه', 'ايوا', 'اي', 'اكيد', 'تمام', 'اكد', 'سجل', 'موافق', 'yes', 'ok', 'okay', 'sure', 'confirm', 'يلا', 'اه', 'ايه'];
 const NO = ['لا', 'لاء', 'الغ', 'الغي', 'الغاء', 'كنسل', 'no', 'cancel', 'stop', 'وقف'];
 const words = (t: string) => t.toLowerCase().replace(/[\u064B-\u065F]/g, '').replace(/[أإآ]/g, 'ا').replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(Boolean);
@@ -60,6 +61,7 @@ export function Assistant() {
   const commit = (next: Msg[]) => { msgsRef.current = next; setMsgs(next); };
   useEffect(() => { setAuto(getAutoSpeak()); }, []);
   useEffect(() => { if (!open) { endCall(); recRef.current?.cancel(); stopSpeaking(); stopListening(); setSpeaking(null); } }, [open]);
+  useEffect(() => { if (open) void ensureContactsPermission(); }, [open]);
   useEffect(() => () => { callOn.current = false; recRef.current?.cancel(); stopSpeaking(); }, []);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy, open]);
@@ -229,7 +231,7 @@ export function Assistant() {
   function openContact(a: Action): Promise<void> {
     return new Promise<void>((resolve) => {
       contactResolve.current = resolve;
-      setContact({ kind: a.type === 'call' ? 'call' : 'send', person: (a.person ?? '').trim(), message: a.message });
+      setContact({ kind: a.type === 'call' ? 'call' : a.type === 'send_message' ? 'send' : 'choose', person: (a.person ?? '').trim(), message: a.message });
     });
   }
   const closeContact = (r: 'sent' | 'called' | 'cancelled') => {
@@ -455,13 +457,13 @@ function ActionCard({ a, wallets, done, ar, onRun, onContact }: { a: Action; wal
   const [wid, setWid] = useState(guess?.id ?? '');
   const [amt, setAmt] = useState(String(a.amount ?? ''));
   const [busy, setBusy] = useState(false);
-  if (a.type === 'send_message' || a.type === 'call') {
+  if (a.type === 'send_message' || a.type === 'call' || a.type === 'contact') {
     return (
       <div className="mt-2 space-y-2 rounded-xl border border-brand-500/40 bg-brand-500/10 p-2.5">
-        <p className="text-xs font-bold">{a.type === 'call' ? (ar ? `اتصال بـ ${a.person}` : `Call ${a.person}`) : ar ? `رسالة واتساب إلى ${a.person}` : `WhatsApp to ${a.person}`}</p>
+        <p className="text-xs font-bold">{a.type === 'call' ? (ar ? `اتصال بـ ${a.person}` : `Call ${a.person}`) : a.type === 'contact' ? (ar ? `التواصل مع ${a.person}` : `Contact ${a.person}`) : ar ? `رسالة واتساب إلى ${a.person}` : `WhatsApp to ${a.person}`}</p>
         {a.message && <p className="whitespace-pre-wrap text-xs">{a.message}</p>}
         <button type="button" className="btn btn-primary w-full py-2" onClick={onContact}>
-          {a.type === 'call' ? (ar ? 'اختيار الرقم والاتصال' : 'Pick number & call') : ar ? 'اختيار الرقم ومراجعة الإرسال' : 'Pick number & review'}
+          {a.type === 'call' ? (ar ? 'اختيار الرقم والاتصال' : 'Pick number & call') : a.type === 'contact' ? (ar ? 'اتصال أم واتساب؟' : 'Call or WhatsApp?') : ar ? 'اختيار الرقم ومراجعة الإرسال' : 'Pick number & review'}
         </button>
       </div>
     );

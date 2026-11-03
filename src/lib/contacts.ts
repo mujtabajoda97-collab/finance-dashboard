@@ -47,16 +47,31 @@ export function norm(s: string): string {
     .trim();
 }
 
-/** Every phone number of every contact whose name contains all words of `query`; best matches first. */
+const OK = (v?: string) => v === 'granted' || v === 'limited';
+
+/**
+ * Shows the native Android permission pop-up when the permission is not granted yet.
+ * 'denied' after the pop-up means the user (or Android, after two refusals) said no: it can only be changed in the phone's app settings.
+ */
+export async function ensureContactsPermission(): Promise<'granted' | 'denied' | 'unsupported'> {
+  const p = plugin();
+  if (!p) return 'unsupported';
+  try {
+    if (OK((await p.checkPermissions?.())?.contacts)) return 'granted';
+    if (OK((await p.requestPermissions?.())?.contacts)) return 'granted';
+    // some Android versions answer the request before the state is stored: ask again
+    return OK((await p.checkPermissions?.())?.contacts) ? 'granted' : 'denied';
+  } catch {
+    return 'denied';
+  }
+}
+
+/** Every phone number of every contact whose name contains all words of `query`; best matches first. Includes Google-synced contacts. */
 export async function findContacts(query: string): Promise<ContactHit[]> {
   const p = plugin();
   if (!p) throw new ContactsFail('unsupported');
   try {
-    const perm = (await p.checkPermissions?.())?.contacts;
-    if (perm !== 'granted') {
-      const asked = (await p.requestPermissions?.())?.contacts;
-      if (asked !== 'granted') throw new ContactsFail('denied');
-    }
+    if ((await ensureContactsPermission()) !== 'granted') throw new ContactsFail('denied');
     const res = await p.getContacts({ projection: { name: true, phones: true } });
     const words = norm(query).split(' ').filter(Boolean);
     if (words.length === 0) return [];

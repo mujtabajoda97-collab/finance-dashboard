@@ -12,6 +12,7 @@ import { RecentTransactions } from '@/components/RecentTransactions';
 import { Converter } from '@/components/Converter';
 import { WalletForm } from '@/components/WalletForm';
 import { PendingInflows } from '@/components/PendingInflows';
+import { PendingOutflows } from '@/components/PendingOutflows';
 import { SafeBoundary } from '@/components/SafeBoundary';
 import { ProjectsPanel } from '@/components/projects/ProjectsPanel';
 import { px as tx } from '@/lib/ptext';
@@ -60,6 +61,7 @@ export default function FinancePage() {
           <div className="w-full min-w-0 max-w-full space-y-4 lg:col-span-3">
             <BalanceCards wallets={data.wallets} rates={data.rates} reserved={data.reserved} onAdd={() => setWalletSheet(null)} onEdit={(w) => setWalletSheet(w)} />
             <SafeBoundary><PendingInflows /></SafeBoundary>
+            <SafeBoundary><PendingOutflows /></SafeBoundary>
             <MonthSummary txns={data.monthTxns} wallets={data.wallets} rates={data.rates} truncated={data.monthTruncated} />
             <RecentTransactions txns={data.recentTxns} wallets={data.wallets} limit={20} />
           </div>

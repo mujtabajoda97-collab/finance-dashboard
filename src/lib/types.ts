@@ -107,6 +107,9 @@ export interface Profile {
   /** Present only after SQL 0006 has been applied. */
   green_api_id_instance?: string | null;
   green_api_token_instance?: string | null;
+  /** Present only after SQL 0012. */
+  emergency_phone?: string | null;
+  escalate_after_minutes?: number | null;
 }
 
 export interface RatePoint {
@@ -169,6 +172,21 @@ export interface PendingInflow {
   created_at: string;
 }
 
+/** A bill / rent that is due but not paid yet (SQL 0012). */
+export interface PendingOutflow {
+  id: string;
+  amount: number;
+  currency: Currency;
+  description: string;
+  category: string;
+  due_date: string | null;
+  wallet_id: string | null;
+  status: 'PENDING' | 'PAID';
+  paid_wallet_id: string | null;
+  paid_at: string | null;
+  created_at: string;
+}
+
 /** A debtor's WhatsApp reply analysed by the webhook (SQL 0011). */
 export interface WaInbox {
   id: string;
@@ -180,5 +198,7 @@ export interface WaInbox {
   suggest_days: number | null;
   suggested_reply: string | null;
   handled: boolean;
+  important?: boolean;
+  escalated_at?: string | null;
   created_at: string;
 }

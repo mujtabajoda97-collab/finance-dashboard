@@ -7,7 +7,7 @@ import { ContactsFail, findContacts, type ContactHit } from '@/lib/contacts';
 import { normalizePhone } from '@/lib/recipient';
 import { sendWhatsApp } from '@/lib/notify';
 
-export interface ContactRequest { kind: 'send' | 'call'; person: string; message?: string }
+export interface ContactRequest { kind: 'send' | 'call' | 'choose'; person: string; message?: string }
 
 /**
  * Mandatory confirmation before anything is sent or dialled: shows the detected name, the phone number and the message.
@@ -19,38 +19,46 @@ export function ContactConfirm({ req, onClose }: { req: ContactRequest; onClose:
   const [hits, setHits] = useState<ContactHit[] | null>(null);
   const [problem, setProblem] = useState<string>('');
   const [pick, setPick] = useState(0);
+  const [denied, setDenied] = useState(false);
   const [other, setOther] = useState(false);
   const [manual, setManual] = useState('');
   const [text, setText] = useState(req.message ?? '');
+  const [mode, setMode] = useState<'send' | 'call' | null>(req.kind === 'choose' ? null : req.kind);
+  const [tries, setTries] = useState(0);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let live = true;
+    setHits(null);
+    setProblem('');
+    setOther(false);
+    setDenied(false);
     findContacts(req.person)
       .then((h) => { if (live) { setHits(h); if (h.length === 0) { setOther(true); setProblem(ar ? `لم أجد «${req.person}» في جهات الاتصال. أدخل الرقم يدوياً.` : `“${req.person}” was not found in your contacts. Enter the number.`); } } })
       .catch((e) => {
         if (!live) return;
         setHits([]);
         setOther(true);
+        setDenied(e instanceof ContactsFail && e.code === 'denied');
         const code = e instanceof ContactsFail ? e.code : 'failed';
         setProblem(code === 'unsupported'
           ? (ar ? 'قراءة جهات الاتصال تعمل داخل تطبيق الأندرويد (بعد تثبيت آخر APK). أدخل الرقم يدوياً.' : 'Contacts work inside the Android app. Enter the number.')
           : code === 'denied'
-            ? (ar ? 'لم يُمنح إذن جهات الاتصال. فعّله من إعدادات الهاتف أو أدخل الرقم يدوياً.' : 'Contacts permission denied. Enter the number.')
+            ? (ar ? 'لم يُمنح إذن جهات الاتصال. اضغط «إعادة طلب الإذن»، وإن لم تظهر النافذة ففعّله من إعدادات الهاتف ← التطبيقات ← My Life OS ← الأذونات ← جهات الاتصال، أو أدخل الرقم يدوياً.' : 'Contacts permission denied. Enter the number.')
             : (ar ? 'تعذّر قراءة جهات الاتصال. أدخل الرقم يدوياً.' : 'Could not read contacts. Enter the number.'));
       });
     return () => { live = false; };
-  }, [req.person, ar]);
+  }, [req.person, ar, tries]);
 
   const chosen = other || !hits || hits.length === 0 ? null : hits[Math.min(pick, hits.length - 1)];
   const rawNumber = other ? manual : chosen?.phone ?? '';
   const digits = normalizePhone(rawNumber);
   const name = other ? (manual ? req.person : req.person) : chosen?.name ?? req.person;
-  const canGo = !!digits && (req.kind === 'call' || text.trim().length > 0) && !busy;
+  const canGo = !!digits && !!mode && (mode === 'call' || text.trim().length > 0) && !busy;
 
   async function confirm() {
     if (!digits) return;
-    if (req.kind === 'call') {
+    if (mode === 'call') {
       onClose('called');
       window.location.href = `tel:+${digits}`;
       return;
@@ -71,9 +79,11 @@ export function ContactConfirm({ req, onClose }: { req: ContactRequest; onClose:
       <div className="max-h-[92vh] w-full max-w-md space-y-3 overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-night-card">
         <div className="flex items-start justify-between gap-2">
           <h3 className="text-base font-bold">
-            {req.kind === 'send'
-              ? (ar ? 'هل تقصد هذا الرقم وتريد إرسال الرسالة؟' : 'Is this the right number? Send the message?')
-              : (ar ? 'هل تقصد هذا الرقم وتريد الاتصال؟' : 'Is this the right number? Call?')}
+            {mode === 'send'
+              ? (ar ? `هل تقصد هذا الرقم وتريد إرسال الرسالة إلى ${req.person}؟` : 'Is this the right number? Send the message?')
+              : mode === 'call'
+                ? (ar ? `هل تقصد هذا الرقم وتريد الاتصال بـ ${req.person}؟` : 'Is this the right number? Call?')
+                : ar ? `هل تريد الاتصال بـ ${req.person} أم إرسال رسالة واتساب؟` : `Call ${req.person} or send a WhatsApp message?`}
           </h3>
           <button type="button" className="icon-btn" onClick={() => onClose('cancelled')} aria-label="×"><X className="size-5" aria-hidden /></button>
         </div>
@@ -105,17 +115,32 @@ export function ContactConfirm({ req, onClose }: { req: ContactRequest; onClose:
                 {manual && !digits && <span className="mt-1 block text-xs text-rose-600 dark:text-rose-300">{ar ? 'الرقم غير صالح (استخدم الصيغة الدولية)' : 'Invalid number'}</span>}
               </label>
             )}
-            {req.kind === 'send' && (
+            {mode === 'send' && (
               <label className="block">
                 <span className="label">{ar ? 'نص الرسالة' : 'Message'}</span>
                 <textarea className="field min-h-24" value={text} onChange={(e) => setText(e.target.value)} />
               </label>
             )}
             {digits && <p className="num text-xs text-muted dark:text-night-muted" dir="ltr">→ +{digits}</p>}
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" aria-pressed={mode === 'call'} onClick={() => setMode('call')} disabled={!digits}
+                className={`btn py-3 ${mode === 'call' ? 'btn-primary' : 'border border-line dark:border-night-line'}`}>
+                <Phone className="size-4" aria-hidden /> {ar ? 'اتصال' : 'Call'}
+              </button>
+              <button type="button" aria-pressed={mode === 'send'} onClick={() => { setMode('send'); if (!text) setText(req.message ?? ''); }} disabled={!digits}
+                className={`btn py-3 ${mode === 'send' ? 'btn-primary' : 'border border-line dark:border-night-line'}`}>
+                <Send className="size-4 rtl:-scale-x-100" aria-hidden /> {ar ? 'رسالة واتساب' : 'WhatsApp'}
+              </button>
+            </div>
+            {denied && (
+              <button type="button" className="btn w-full border border-amber-500/60 py-2" onClick={() => setTries((n) => n + 1)}>
+                {ar ? 'إعادة طلب إذن جهات الاتصال' : 'Ask for contacts permission again'}
+              </button>
+            )}
             <div className="grid grid-cols-1 gap-2">
               <button type="button" className="btn btn-primary py-3" disabled={!canGo} onClick={() => void confirm()}>
-                {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : req.kind === 'send' ? <Send className="size-4 rtl:-scale-x-100" aria-hidden /> : <Phone className="size-4" aria-hidden />}
-                {req.kind === 'send' ? (ar ? 'تأكيد وإرسال' : 'Confirm & send') : ar ? 'تأكيد واتصال' : 'Confirm & call'}
+                {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : mode === 'send' ? <Send className="size-4 rtl:-scale-x-100" aria-hidden /> : <Phone className="size-4" aria-hidden />}
+                {mode === 'send' ? (ar ? 'تأكيد وإرسال' : 'Confirm & send') : mode === 'call' ? (ar ? 'تأكيد واتصال' : 'Confirm & call') : ar ? 'اختر: اتصال أو واتساب' : 'Choose call or WhatsApp'}
               </button>
               <div className="grid grid-cols-2 gap-2">
                 <button type="button" className="btn border border-line py-2 dark:border-night-line" onClick={() => (other && hits.length > 0 ? setOther(false) : setOther(true))}>

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cacheGet, cacheSet } from './cache';
 import { supabase } from './supabase';
 import { reservedByWallet } from './reserve';
-import type { AlertLog, Debt, FundReservation, PendingInflow, Profile, WaInbox, Project, ProjectCashflow, RatePoint } from './types';
+import type { AlertLog, Debt, FundReservation, PendingInflow, PendingOutflow, Profile, WaInbox, Project, ProjectCashflow, RatePoint } from './types';
 
 /** Debts, alert log, profile and 7-day rate history. Each part fails on its own without breaking the app. */
 export function useExtraData(enabled: boolean, uid = '') {
@@ -24,6 +24,9 @@ export function useExtraData(enabled: boolean, uid = '') {
   const [pending, setPending] = useState<PendingInflow[]>([]);
   /** true once SQL 0010 (pending_inflows, receive_pending_inflow) is applied. */
   const [pendingReady, setPendingReady] = useState(false);
+  const [pendingOut, setPendingOut] = useState<PendingOutflow[]>([]);
+  /** true once SQL 0012 (pending_outflows, pay_pending_outflow) is applied. */
+  const [pendingOutReady, setPendingOutReady] = useState(false);
   const reserved = useMemo(() => reservedByWallet(reservations), [reservations]);
   const [inbox, setInbox] = useState<WaInbox[]>([]);
   const [extraError, setExtraError] = useState<string | null>(null);
@@ -132,6 +135,23 @@ export function useExtraData(enabled: boolean, uid = '') {
     setPending(rows.map((r) => ({ ...r, amount: Number(r.amount) })) as unknown as PendingInflow[]);
   }, []);
 
+  const loadPendingOut = useCallback(async () => {
+    const { data, error } = await supabase()
+      .from('pending_outflows')
+      .select('id,amount,currency,description,category,due_date,wallet_id,status,paid_wallet_id,paid_at,created_at')
+      .order('due_date', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (error) { // table missing until SQL 0012 is applied: fail-soft
+      setPendingOutReady(false);
+      setPendingOut([]);
+      return;
+    }
+    setPendingOutReady(true);
+    const rows = (data ?? []) as unknown as Record<string, unknown>[];
+    setPendingOut(rows.map((r) => ({ ...r, amount: Number(r.amount) })) as unknown as PendingOutflow[]);
+  }, []);
+
   const loadAlerts = useCallback(async () => {
     const { data, error } = await supabase()
       .from('alert_logs')
@@ -144,7 +164,9 @@ export function useExtraData(enabled: boolean, uid = '') {
 
   const loadProfile = useCallback(async () => {
     const q = (cols: string) => supabase().from('profiles').select(cols).maybeSingle();
-    let res = await q('display_name,telegram_chat_id,whatsapp_phone,green_api_id_instance,green_api_token_instance');
+    let res = await q('display_name,telegram_chat_id,whatsapp_phone,green_api_id_instance,green_api_token_instance,emergency_phone,escalate_after_minutes');
+    // SQL 0012 columns missing: retry with the SQL 0006 set.
+    if (res.error) res = await q('display_name,telegram_chat_id,whatsapp_phone,green_api_id_instance,green_api_token_instance');
     // New columns missing until SQL 0006 is applied: fall back to the basic ones.
     if (res.error) res = await q('display_name,telegram_chat_id,whatsapp_phone');
     if (res.error) throw res.error;
@@ -166,11 +188,11 @@ export function useExtraData(enabled: boolean, uid = '') {
   }, []);
 
   const loadExtra = useCallback(async () => {
-    const results = await Promise.allSettled([loadDebts(), loadAlerts(), loadProfile(), loadRateHistory(), loadProjects(), loadReservations(), loadPending(), loadInbox()]);
+    const results = await Promise.allSettled([loadDebts(), loadAlerts(), loadProfile(), loadRateHistory(), loadProjects(), loadReservations(), loadPending(), loadPendingOut(), loadInbox()]);
     const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
     if (!failed) synced.current = true;
     setExtraError(failed && !synced.current && !(uid && cacheGet(uid, 'extra')) ? String(failed.reason?.message ?? failed.reason) : null);
-  }, [uid, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadProjects, loadReservations, loadPending, loadInbox]);
+  }, [uid, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadProjects, loadReservations, loadPending, loadPendingOut, loadInbox]);
 
   useEffect(() => {
     if (enabled) loadExtra();
@@ -190,5 +212,5 @@ export function useExtraData(enabled: boolean, uid = '') {
     return () => window.removeEventListener('online', loadExtra);
   }, [enabled, loadExtra]);
 
-  return { inbox, loadInbox, debts, alerts, profile, rateHistory, projects, cashflows, projectsReady, projectsV2, loadProjects, reservations, reservationsReady, reserved, loadReservations, pending, pendingReady, loadPending, extraError, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadExtra };
+  return { inbox, loadInbox, debts, alerts, profile, rateHistory, projects, cashflows, projectsReady, projectsV2, loadProjects, reservations, reservationsReady, reserved, loadReservations, pending, pendingReady, loadPending, pendingOut, pendingOutReady, loadPendingOut, extraError, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadExtra };
 }

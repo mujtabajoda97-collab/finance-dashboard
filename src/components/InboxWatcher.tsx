@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useApp } from './Providers';
 import { useData } from '@/lib/data';
 import { showLocalNotification } from '@/lib/notify';
+import { supabase } from '@/lib/supabase';
 
 const SEEN = 'wa_inbox_seen_v1';
 
@@ -15,8 +16,27 @@ export function InboxWatcher() {
   latest.current = { inbox, debts, lang };
 
   useEffect(() => {
-    const id = window.setInterval(() => void loadInbox(), 60_000);
+    // Every minute: refresh replies and let the server escalate important replies that waited too long (emergency number in Settings).
+    const tick = async () => {
+      await loadInbox();
+      try {
+        const { data: s } = await supabase().auth.getSession();
+        const token = s.session?.access_token;
+        if (!token) return;
+        const r = await fetch('/api/whatsapp/escalate/', { method: 'POST', headers: { authorization: `Bearer ${token}` }, cache: 'no-store' });
+        const j = (await r.json().catch(() => ({}))) as { sent?: number };
+        if (j.sent && j.sent > 0) {
+          const ar = latest.current.lang === 'ar';
+          const msg = ar ? `أُرسل تنبيه إلى رقم الطوارئ بخصوص ${j.sent} رسالة مهمة لم تُعالج` : `Emergency contact alerted about ${j.sent} unhandled message(s)`;
+          notify(msg, 'warning');
+          void showLocalNotification(ar ? 'تصعيد رسالة مهمة' : 'Escalation', msg, 'escalate', '/debts/');
+        }
+      } catch { /* offline: try again next minute */ }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 60_000);
     return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadInbox]);
 
   useEffect(() => {
