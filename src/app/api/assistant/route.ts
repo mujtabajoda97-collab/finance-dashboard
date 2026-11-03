@@ -36,13 +36,122 @@ async function verify(token: string): Promise<boolean> {
   }
 }
 
-/** POST { prompt, context?, history?, mode?, key? } with the Supabase access token. Only signed-in users can use it. */
+type Provider = 'gemini' | 'openai' | 'anthropic';
+interface Turn { role: 'user' | 'model'; text: string }
+
+const DEFAULT_MODEL: Record<Provider, string> = {
+  // 2.5-flash is closed to new Google accounts; 3.8-flash is the model Google itself points new keys to.
+  gemini: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+  openai: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  anthropic: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-20241022',
+};
+const ENV_KEY: Record<Provider, string | undefined> = {
+  gemini: process.env.GEMINI_API_KEY,
+  openai: process.env.OPENAI_API_KEY,
+  anthropic: process.env.ANTHROPIC_API_KEY,
+};
+
+class AiError extends Error {
+  constructor(public code: string, public detail = '', public status = 502) {
+    super(code);
+  }
+}
+
+const TIMEOUT_MS = 22_000;
+
+async function post(url: string, headers: Record<string, string>, body: unknown): Promise<Response> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  try {
+    return await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body), signal: ctl.signal, cache: 'no-store' });
+  } catch (e) {
+    throw new AiError((e as Error).name === 'AbortError' ? 'timeout' : 'network', (e as Error).message.slice(0, 120));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function errDetail(r: Response, model: string): Promise<string> {
+  try {
+    const j = (await r.json()) as { error?: { message?: string; status?: string; type?: string } | string };
+    const e = j.error;
+    const msg = typeof e === 'string' ? e : `${e?.status ?? e?.type ?? r.status}: ${e?.message ?? ''}`;
+    return `${model} → ${msg}`.slice(0, 300);
+  } catch {
+    return `${model} → ${r.status}`;
+  }
+}
+
+/** One call to the chosen provider, no model loop (a loop is what ran into the platform timeout). Returns the raw text. */
+async function callProvider(provider: Provider, key: string, model: string, system: string, turns: Turn[]): Promise<string> {
+  if (provider === 'gemini') {
+    const r = await post(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { 'x-goog-api-key': key }, {
+      systemInstruction: { parts: [{ text: system }] },
+      contents: turns.map((t) => ({ role: t.role, parts: [{ text: t.text }] })),
+      generationConfig: { temperature: 0.4, responseMimeType: 'application/json', maxOutputTokens: 1200 },
+    });
+    if (r.status === 429) throw new AiError('quota', await errDetail(r, model), 429);
+    if (!r.ok) {
+      const d = await errDetail(r, model);
+      throw new AiError(/API key|API_KEY|PERMISSION_DENIED/i.test(d) ? 'key-rejected' : r.status === 404 ? 'model-not-found' : `http-${r.status}`, d, r.status === 400 || r.status === 404 ? 400 : 502);
+    }
+    const j = (await r.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    return j.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+  }
+  if (provider === 'openai') {
+    const r = await post('https://api.openai.com/v1/chat/completions', { authorization: `Bearer ${key}` }, {
+      model,
+      temperature: 0.4,
+      max_tokens: 1200,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'system', content: system }, ...turns.map((t) => ({ role: t.role === 'model' ? 'assistant' : 'user', content: t.text }))],
+    });
+    if (r.status === 429) throw new AiError('quota', await errDetail(r, model), 429);
+    if (r.status === 401) throw new AiError('key-rejected', await errDetail(r, model), 400);
+    if (!r.ok) throw new AiError(r.status === 404 ? 'model-not-found' : `http-${r.status}`, await errDetail(r, model), r.status === 404 ? 400 : 502);
+    const j = (await r.json()) as { choices?: { message?: { content?: string } }[] };
+    return j.choices?.[0]?.message?.content ?? '';
+  }
+  const r = await post('https://api.anthropic.com/v1/messages', { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, {
+    model,
+    max_tokens: 1200,
+    temperature: 0.4,
+    system,
+    messages: turns.map((t) => ({ role: t.role === 'model' ? 'assistant' : 'user', content: t.text })),
+  });
+  if (r.status === 429) throw new AiError('quota', await errDetail(r, model), 429);
+  if (r.status === 401 || r.status === 403) throw new AiError('key-rejected', await errDetail(r, model), 400);
+  if (!r.ok) throw new AiError(r.status === 404 ? 'model-not-found' : `http-${r.status}`, await errDetail(r, model), r.status === 404 ? 400 : 502);
+  const j = (await r.json()) as { content?: { type: string; text?: string }[] };
+  return (j.content ?? []).filter((c) => c.type === 'text').map((c) => c.text ?? '').join('');
+}
+
+/** Models without a JSON mode may wrap the answer in text or fences: take the outermost {...}. */
+function parseJson(text: string): unknown {
+  const t = text.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
+  try {
+    return JSON.parse(t);
+  } catch {
+    const a = t.indexOf('{');
+    const b = t.lastIndexOf('}');
+    if (a >= 0 && b > a) {
+      try {
+        return JSON.parse(t.slice(a, b + 1));
+      } catch {
+        /* fall through */
+      }
+    }
+    return null;
+  }
+}
+
+/** POST { prompt, context?, history?, mode?, provider?, key?, model? } with the Supabase access token. Only signed-in users can use it. */
 export async function POST(req: Request) {
   const auth = req.headers.get('authorization') ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
   if (!token || !(await verify(token))) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
 
-  let body: { prompt?: unknown; context?: unknown; history?: unknown; mode?: unknown; key?: unknown };
+  let body: { prompt?: unknown; context?: unknown; history?: unknown; mode?: unknown; provider?: unknown; key?: unknown; apiKey?: unknown; model?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -50,123 +159,34 @@ export async function POST(req: Request) {
   }
   const prompt = typeof body.prompt === 'string' ? body.prompt.trim().slice(0, MAX_PROMPT) : '';
   if (!prompt) return NextResponse.json({ ok: false, error: 'empty' }, { status: 400 });
-  // The key typed in the app wins over the server variable. Pasted keys often carry spaces, quotes or line breaks.
+
+  const provider: Provider = body.provider === 'openai' || body.provider === 'anthropic' ? body.provider : 'gemini';
+  // Pasted keys often carry spaces, quotes or line breaks. The key typed in the app wins over the server variable.
   const clean = (v: unknown) => (typeof v === 'string' ? v.replace(/["'\s]/g, '') : '');
-  const own = clean(body.key);
-  const apiKey = /^[\x21-\x7e]{20,200}$/.test(own) ? own : clean(process.env.GEMINI_API_KEY);
-  if (!apiKey) return NextResponse.json({ ok: false, error: 'no-key' }, { status: 400 });
+  const typed = clean(body.apiKey ?? body.key);
+  const apiKey = /^[\x21-\x7e]{20,300}$/.test(typed) ? typed : clean(ENV_KEY[provider]);
+  if (!apiKey) return NextResponse.json({ ok: false, error: 'no-key', provider }, { status: 400 });
+  const customModel = typeof body.model === 'string' && /^[A-Za-z0-9._:-]{3,80}$/.test(body.model.trim()) ? body.model.trim() : '';
+  const model = customModel || DEFAULT_MODEL[provider];
 
   const classify = body.mode === 'classify';
   const context = typeof body.context === 'string' ? body.context.slice(0, MAX_CONTEXT) : '';
-  const hist = Array.isArray(body.history) ? (body.history as { role?: string; text?: string }[]).slice(-8) : [];
-  const contents = [
-    ...hist
-      .filter((h) => typeof h?.text === 'string' && (h.role === 'user' || h.role === 'model'))
-      .map((h) => ({ role: h.role as string, parts: [{ text: String(h.text).slice(0, 1500) }] })),
-    { role: 'user', parts: [{ text: classify ? prompt : `CONTEXT:\n${context}\n\nطلب المستخدم:\n${prompt}` }] },
-  ];
+  const hist = (Array.isArray(body.history) ? (body.history as { role?: string; text?: string }[]) : []).slice(-8)
+    .filter((h) => typeof h?.text === 'string' && (h.role === 'user' || h.role === 'model'))
+    .map((h) => ({ role: h.role as 'user' | 'model', text: String(h.text).slice(0, 1500) }));
+  // Anthropic needs the first turn to be the user's and strictly alternating roles.
+  const turns: Turn[] = [];
+  for (const h of hist) if (turns.length > 0 ? turns[turns.length - 1].role !== h.role : h.role === 'user') turns.push(h);
+  if (turns.length > 0 && turns[turns.length - 1].role === 'user') turns.pop();
+  turns.push({ role: 'user', text: classify ? prompt : `CONTEXT:\n${context}\n\nطلب المستخدم:\n${prompt}` });
 
-  const started = Date.now();
-  const left = () => 24_000 - (Date.now() - started);
-  const gem = async (path: string, init: RequestInit | undefined, ms: number) => {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), ms);
-    try {
-      return await fetch(`https://generativelanguage.googleapis.com/v1beta/${path}`, {
-        ...init,
-        signal: ctl.signal,
-        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-        cache: 'no-store',
-      });
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-  const errOf = async (r: Response) => {
-    try {
-      const j = (await r.json()) as { error?: { message?: string; status?: string } };
-      return `${j.error?.status ?? r.status}: ${(j.error?.message ?? '').slice(0, 220)}`;
-    } catch {
-      return String(r.status);
-    }
-  };
-
-  // Fast path: go straight to a known fast model (no discovery round-trip). Only when every one of them is
-  // unavailable (404) is the key's own model list asked for, within the remaining time budget.
-  const tried = new Set<string>();
-  let candidates = [process.env.GEMINI_MODEL, 'gemini-3.8-flash', 'gemini-2.0-flash'].filter(Boolean) as string[];
-  const notes: string[] = [];
-  let lastErr = 'unavailable';
-  let detail = '';
-  let discovered = false;
-
-  while (candidates.length > 0 && left() > 2_000) {
-    const model = candidates.shift() as string;
-    if (tried.has(model)) continue;
-    tried.add(model);
-    try {
-      const r = await gem(
-        `models/${model}:generateContent`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: classify ? CLASSIFY : SYSTEM }] },
-            contents,
-            generationConfig: {
-              temperature: 0.4,
-              responseMimeType: 'application/json',
-              maxOutputTokens: 1200,
-            },
-          }),
-        },
-        Math.min(12_000, left()),
-      );
-      if (r.status === 429) return NextResponse.json({ ok: false, error: 'quota', detail: await errOf(r) }, { status: 429 });
-      if (!r.ok) {
-        detail = `${model} → ${await errOf(r)}`;
-        notes.push(detail);
-        if (/API_KEY|API key not valid|PERMISSION_DENIED/i.test(detail)) return NextResponse.json({ ok: false, error: 'key-rejected', detail }, { status: 400 });
-        lastErr = `gemini-${r.status}`;
-      } else {
-        const j = (await r.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[]; promptFeedback?: { blockReason?: string } };
-        const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
-        if (text) {
-          let parsed: unknown = null;
-          try {
-            parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
-          } catch {
-            parsed = classify ? null : { reply: text, actions: [] };
-          }
-          return NextResponse.json({ ok: true, model, data: parsed });
-        }
-        detail = `${model} → empty (${j.promptFeedback?.blockReason ?? 'no text'})`;
-        notes.push(detail);
-        lastErr = 'empty';
-      }
-    } catch (e) {
-      lastErr = (e as Error).name === 'AbortError' ? 'timeout' : 'network';
-      detail = `${model} → ${lastErr}`;
-      notes.push(detail);
-    }
-    if (candidates.length === 0 && !discovered && lastErr.startsWith('gemini-4') && left() > 5_000) {
-      discovered = true;
-      try {
-        const lr = await gem('models?pageSize=100', undefined, 4_000);
-        if (lr.ok) {
-          const lj = (await lr.json()) as { models?: { name: string; supportedGenerationMethods?: string[] }[] };
-          // Newest full "flash" models first; "lite" / older families are excluded (often closed to new accounts).
-          const ver = (n: string) => Number((/gemini-(\d+(?:\.\d+)?)/.exec(n) ?? [])[1] ?? 0);
-          candidates = (lj.models ?? [])
-            .filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent') && /flash/.test(m.name) && !/(lite|8b|image|tts|live|audio|thinking|exp|preview)/.test(m.name))
-            .map((m) => m.name.replace(/^models\//, ''))
-            .filter((m) => !tried.has(m))
-            .sort((a, b) => ver(b) - ver(a))
-            .slice(0, 3);
-        }
-      } catch {
-        /* keep the last error */
-      }
-    }
+  try {
+    const text = await callProvider(provider, apiKey, model, classify ? CLASSIFY : SYSTEM, turns);
+    if (!text) throw new AiError('empty', `${model} → empty answer`);
+    const parsed = parseJson(text) ?? (classify ? null : { reply: text, actions: [] });
+    return NextResponse.json({ ok: true, provider, model, data: parsed });
+  } catch (e) {
+    if (e instanceof AiError) return NextResponse.json({ ok: false, error: e.code, provider, detail: e.detail }, { status: e.status });
+    return NextResponse.json({ ok: false, error: 'unavailable', provider, detail: (e as Error).message.slice(0, 160) }, { status: 502 });
   }
-  return NextResponse.json({ ok: false, error: lastErr, detail: (notes.length ? notes : [detail]).join(' | ').slice(0, 600) }, { status: 502 });
 }

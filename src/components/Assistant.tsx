@@ -13,7 +13,7 @@ import { remaining, validatePayment } from '@/lib/debt';
 import { summarize } from '@/lib/projects';
 import { buildTxnRow } from '@/lib/finance';
 import { newRequestId } from '@/lib/flags';
-import { getGeminiKey } from '@/lib/assistantKey';
+import { getAiKey, getAiModel, getProvider } from '@/lib/assistantKey';
 import type { Currency, Debt, Wallet } from '@/lib/types';
 
 interface Action { type: 'expense' | 'income' | 'debt_payment'; amount: number; wallet?: string; category?: string; notes?: string; person?: string }
@@ -106,14 +106,16 @@ export function Assistant() {
       const r = await fetch('/api/assistant/', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token ?? ''}` },
-        body: JSON.stringify({ prompt: q, context: await buildContext(), history, key: getGeminiKey() || undefined }),
+        body: JSON.stringify({ prompt: q, context: await buildContext(), history, provider: getProvider(), apiKey: getAiKey() || undefined, model: getAiModel() || undefined }),
       });
       const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; detail?: string; data?: { reply?: string; actions?: Action[] } };
       if (!j.ok) {
         const map: Record<string, string> = {
-          'no-key': ar ? 'لم يُضبط مفتاح Gemini بعد. أضفه من الإعدادات ← المساعد الذكي، أو ضع GEMINI_API_KEY في متغيرات Vercel.' : 'No Gemini key yet. Add it in Settings → Smart assistant, or set GEMINI_API_KEY in Vercel.',
-          'key-rejected': ar ? 'رفض Gemini المفتاح. تحقق منه في الإعدادات.' : 'Gemini rejected the key.',
-          quota: ar ? 'تم تجاوز حصة Gemini حالياً. حاول لاحقاً.' : 'Gemini quota exceeded.',
+          'no-key': ar ? 'لم يُضبط مفتاح المزوّد المختار بعد. أضفه من الإعدادات ← المساعد الذكي.' : 'No key for the selected provider yet. Add it in Settings → Smart assistant.',
+          'key-rejected': ar ? 'رفض المزوّد المفتاح. تحقق منه في الإعدادات.' : 'The provider rejected the key.',
+          'model-not-found': ar ? 'الموديل غير متاح لحسابك. اكتب اسم موديل آخر في الإعدادات.' : 'Model not available for your account. Set another model in Settings.',
+          timeout: ar ? 'تأخر رد المزوّد، حاول مرة أخرى.' : 'The provider timed out, try again.',
+          quota: ar ? 'تم تجاوز حصة المزوّد حالياً. حاول لاحقاً.' : 'Provider quota exceeded.',
           unauthorized: ar ? 'انتهت الجلسة، سجّل الدخول من جديد.' : 'Session expired.',
         };
         throw new Error((map[j.error ?? ''] ?? (ar ? 'تعذّر الوصول للمساعد الآن.' : 'Assistant unavailable.')) + (j.detail ? `\n(${j.detail})` : !j.error ? `\n(HTTP ${r.status})` : ''));
