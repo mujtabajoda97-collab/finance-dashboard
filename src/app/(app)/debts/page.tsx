@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertTriangle, ArrowLeftRight, Bell, Check, ChevronDown, Plus, CirclePlus, Wallet as WalletIcon } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Bell, Check, ChevronDown, Pencil, Plus, CirclePlus, Wallet as WalletIcon } from 'lucide-react';
 import { useApp } from '@/components/Providers';
 import { Sheet } from '@/components/Sheet';
 import { PaymentForm } from '@/components/debts/PaymentForm';
 import { DebtForm } from '@/components/debts/DebtForm';
+import { EditDebtForm } from '@/components/debts/EditDebtForm';
 import { IncreaseForm } from '@/components/debts/IncreaseForm';
 import { DebtReplies } from '@/components/debts/DebtReplies';
 import { DebtHistory } from '@/components/debts/DebtHistory';
@@ -36,6 +37,7 @@ export default function DebtsPage() {
   const [increasing, setIncreasing] = useState<Debt | null>(null);
   const [histV, setHistV] = useState(0);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Debt | null>(null);
 
   const totals = (type: DebtType) => {
     let rem = 0, tot = 0, partial = false;
@@ -97,7 +99,12 @@ export default function DebtsPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 pb-16">
-      <div className="flex justify-end"><PdfButton build={buildDoc} fileName="debts-statement.pdf" /></div>
+      <div className="sticky top-0 z-20 -mx-4 flex items-center gap-2 bg-paper/85 px-4 py-2 backdrop-blur sm:-mx-6 sm:px-6 dark:bg-night/85">
+        <button type="button" onClick={() => setAdding(true)} className="btn btn-primary flex-1 py-2.5">
+          <Plus className="size-4" aria-hidden /> {T('addDebt')}
+        </button>
+        <PdfButton build={buildDoc} fileName="debts-statement.pdf" />
+      </div>
       <div className="grid grid-cols-2 gap-3">
         {summary(T('owedToYou'), owed, 'from-emerald-500/30 to-emerald-900/10 border-emerald-400/40 text-emerald-700 dark:text-emerald-100', 'bg-emerald-300')}
         {summary(T('youOwe'), owe, 'from-rose-500/30 to-rose-900/10 border-rose-400/40 text-rose-700 dark:text-rose-100', 'bg-rose-300')}
@@ -131,6 +138,9 @@ export default function DebtsPage() {
                       {d.due_date && <span className="text-muted dark:text-night-muted">{T('dueDate')}: {d.due_date}</span>}
                     </div>
                     {d.notes && <p className="text-xs text-muted dark:text-night-muted">{d.notes}</p>}
+                    <button type="button" className="btn w-full border border-line py-2 dark:border-night-line" onClick={() => setEditing(d)}>
+                      <Pencil className="size-4" aria-hidden /> {lang === 'ar' ? 'تعديل الدين' : 'Edit debt'}
+                    </button>
                     <DebtReplies debt={d} />
                     {isOpenDebt(d) && d.due_date && <DebtAlert debt={d} />}
                     {isOpenDebt(d) && (
@@ -151,10 +161,6 @@ export default function DebtsPage() {
           })}
         </ul>
       )}
-
-      <button type="button" onClick={() => setAdding(true)} className="btn w-full border border-dashed border-line py-3 text-muted dark:border-night-line dark:text-night-muted">
-        <Plus className="size-4" aria-hidden /> {T('addDebt')}
-      </button>
 
       <section id="alerts" aria-labelledby="alerts-title" className="scroll-mt-20 space-y-2.5">
         <h2 id="alerts-title" className="text-base font-bold">{T('alertsLog')}</h2>
@@ -204,6 +210,11 @@ export default function DebtsPage() {
             setHistV((v) => v + 1);
             await Promise.all([data.loadDebts(), data.refreshMoney(), data.loadAlerts(), data.loadReservations()]);
           }} />
+        </Sheet>
+      )}
+      {editing && (
+        <Sheet title={lang === 'ar' ? 'تعديل الدين' : 'Edit debt'} onClose={() => setEditing(null)}>
+          <EditDebtForm debt={editing} onDone={async () => { setEditing(null); setHistV((v) => v + 1); await Promise.all([data.loadDebts(), data.loadAlerts()]); }} />
         </Sheet>
       )}
       {adding && (

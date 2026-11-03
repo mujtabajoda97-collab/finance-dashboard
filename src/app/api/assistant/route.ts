@@ -15,6 +15,9 @@ const SYSTEM = `أنت «المساعد الذكي» داخل تطبيق «نظ�
 - مصروف: {"type":"expense","amount":150,"wallet":"اسم محفظة من CONTEXT","category":"GROCERIES","notes":"البقالة"}
 - دخل: {"type":"income","amount":..,"wallet":"..","category":"SALARY|PROJECT|GENERAL","notes":".."}
 - سداد دين: {"type":"debt_payment","person":"اسم الشخص كما في الديون","amount":500,"wallet":"اسم المحفظة"}
+- إرسال رسالة واتساب لشخص: {"type":"send_message","person":"الاسم كما قاله المستخدم","message":"نص الرسالة الجاهز والودّي"}
+- اتصال هاتفي بشخص: {"type":"call","person":"الاسم كما قاله المستخدم"}
+(لا تخترع رقم هاتف: التطبيق يبحث عن الاسم في جهات الاتصال ويعرض نافذة تأكيد بالاسم والرقم والنص، ولا يُرسل شيء قبل ضغط المستخدم «تأكيد». لا تقل إنك أرسلت أو اتصلت؛ قل إنك جهّزت الرسالة/الاتصال وإن عليه المراجعة والتأكيد.)
 فئات المصروف المسموحة: GENERAL, FOOD, GROCERIES, TRANSPORT, BILLS, RENT, PERSONAL, SHOPPING, HEALTH.
 اختر محفظة من قائمة المحافظ بنفس عملة العملية؛ «كاش» تعني محفظة اسمها يحتوي كاش/نقد إن وُجدت. إن كان الاختيار غامضاً فاترك wallet فارغاً واطلب التوضيح في reply.
 لا تنفّذ شيئاً بنفسك: التطبيق يعرض للمستخدم تأكيداً قبل أي تسجيل.
@@ -57,7 +60,7 @@ class AiError extends Error {
   }
 }
 
-const TIMEOUT_MS = 22_000;
+const TIMEOUT_MS = 25_000;
 
 async function post(url: string, headers: Record<string, string>, body: unknown): Promise<Response> {
   const ctl = new AbortController();
@@ -99,13 +102,12 @@ async function callProvider(provider: Provider, key: string, model: string, syst
     return j.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
   }
   if (provider === 'openai') {
-    const r = await post('https://api.openai.com/v1/chat/completions', { authorization: `Bearer ${key}` }, {
-      model,
-      temperature: 0.4,
-      max_tokens: 1200,
-      response_format: { type: 'json_object' },
-      messages: [{ role: 'system', content: system }, ...turns.map((t) => ({ role: t.role === 'model' ? 'assistant' : 'user', content: t.text }))],
-    });
+    // o1/o3-style reasoning models take no system role, temperature or JSON mode, and use max_completion_tokens.
+    const reasoning = /^o\d/.test(model);
+    const msgs = turns.map((t) => ({ role: t.role === 'model' ? 'assistant' : 'user', content: t.text }));
+    const r = await post('https://api.openai.com/v1/chat/completions', { authorization: `Bearer ${key}` }, reasoning
+      ? { model, max_completion_tokens: 4000, messages: msgs.map((m, i) => (i === 0 ? { ...m, content: `${system}\n\n${m.content}` } : m)) }
+      : { model, temperature: 0.4, max_tokens: 1200, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: system }, ...msgs] });
     if (r.status === 429) throw new AiError('quota', await errDetail(r, model), 429);
     if (r.status === 401) throw new AiError('key-rejected', await errDetail(r, model), 400);
     if (!r.ok) throw new AiError(r.status === 404 ? 'model-not-found' : `http-${r.status}`, await errDetail(r, model), r.status === 404 ? 400 : 502);

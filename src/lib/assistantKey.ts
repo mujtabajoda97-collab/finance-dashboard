@@ -5,6 +5,14 @@ export const PROVIDERS: { id: AiProvider; label: string; model: string; hint: st
   { id: 'anthropic', label: 'Anthropic Claude', model: 'claude-3-5-haiku-20241022', hint: 'sk-ant-…' },
 ];
 
+/** Default OpenAI list, newest/smartest first down to fastest/lightest. */
+export const OPENAI_MODELS: { id: string; ar: string; en: string }[] = [
+  { id: 'gpt-4o', ar: 'أعلى دقة للتحليلات المعقدة', en: 'highest accuracy' },
+  { id: 'gpt-4o-mini', ar: 'سريع واقتصادي للاستخدام اليومي', en: 'fast and cheap' },
+  { id: 'o1-preview', ar: 'تفكير منطقي وحسابات', en: 'reasoning' },
+  { id: 'o1-mini', ar: 'تفكير منطقي أخف', en: 'light reasoning' },
+];
+
 const P = 'ai_provider_v1';
 const K = (p: AiProvider) => (p === 'gemini' ? 'gemini_key_v1' : `ai_key_${p}_v1`);
 const M = (p: AiProvider) => `ai_model_${p}_v1`;

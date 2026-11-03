@@ -51,6 +51,12 @@ jobs:
           npm install --save --legacy-peer-deps --no-audit --no-fund @capacitor-community/text-to-speech@5 || npm install --save --legacy-peer-deps --no-audit --no-fund @capacitor-community/text-to-speech@6 || echo "text-to-speech plugin NOT installed"
           npm ls @capacitor-community/speech-recognition @capacitor-community/text-to-speech --legacy-peer-deps || true
 
+      # Phone contacts for "message / call <name>" (read-only; every send still needs the user's confirmation).
+      - name: Install contacts plugin (optional)
+        run: |
+          npm install --save --legacy-peer-deps --no-audit --no-fund @capacitor-community/contacts@6 || npm install --save --legacy-peer-deps --no-audit --no-fund @capacitor-community/contacts@5 || echo "contacts plugin NOT installed"
+          npm ls @capacitor-community/contacts --legacy-peer-deps || true
+
       - name: Create the Android project (first run only)
         run: |
           if [ ! -d android ]; then
@@ -64,7 +70,7 @@ jobs:
           mkdir -p android/app/src/main/res/raw
           cp android-res/raw/alarm.wav android/app/src/main/res/raw/alarm.wav
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          for perm in POST_NOTIFICATIONS SCHEDULE_EXACT_ALARM USE_EXACT_ALARM VIBRATE WAKE_LOCK RECEIVE_BOOT_COMPLETED USE_BIOMETRIC USE_FINGERPRINT RECORD_AUDIO MODIFY_AUDIO_SETTINGS; do
+          for perm in POST_NOTIFICATIONS SCHEDULE_EXACT_ALARM USE_EXACT_ALARM VIBRATE WAKE_LOCK RECEIVE_BOOT_COMPLETED USE_BIOMETRIC USE_FINGERPRINT RECORD_AUDIO MODIFY_AUDIO_SETTINGS READ_CONTACTS; do
             if ! grep -q "android.permission.$perm\"" "$MANIFEST"; then
               sed -i "s#</manifest>#    <uses-permission android:name=\"android.permission.$perm\" />\n</manifest>#" "$MANIFEST"
             fi
@@ -72,6 +78,9 @@ jobs:
           # Android 11+ package visibility: the app must be allowed to see the speech recognizer and TTS engine.
           if ! grep -q "android.speech.RecognitionService" "$MANIFEST"; then
             sed -i "s#</manifest>#    <queries>\n        <intent><action android:name=\"android.speech.RecognitionService\" /></intent>\n        <intent><action android:name=\"android.intent.action.TTS_SERVICE\" /></intent>\n    </queries>\n</manifest>#" "$MANIFEST"
+          fi
+          if ! grep -q "android.intent.action.DIAL" "$MANIFEST"; then
+            sed -i "s#</queries>#        <intent><action android:name=\"android.intent.action.DIAL\" /><data android:scheme=\"tel\" /></intent>\n    </queries>#" "$MANIFEST"
           fi
           grep -n "uses-permission" "$MANIFEST"
           ls -la android/app/src/main/res/raw

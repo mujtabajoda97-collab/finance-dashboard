@@ -138,7 +138,11 @@ export async function speak(text: string, lang: 'ar' | 'en'): Promise<void> {
   u.lang = language;
   const voice = synth.getVoices().find((v) => v.lang.toLowerCase().startsWith(lang));
   if (voice) u.voice = voice;
-  synth.speak(u);
+  await new Promise<void>((resolve) => {
+    u.onend = () => resolve();
+    u.onerror = () => resolve();
+    synth.speak(u);
+  });
 }
 
 export function stopSpeaking(): void {
