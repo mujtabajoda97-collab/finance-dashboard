@@ -94,7 +94,7 @@ export async function POST(req: Request) {
   // Fast path: go straight to a known fast model (no discovery round-trip). Only when every one of them is
   // unavailable (404) is the key's own model list asked for, within the remaining time budget.
   const tried = new Set<string>();
-  let candidates = [process.env.GEMINI_MODEL, 'gemini-2.5-flash', 'gemini-flash-latest'].filter(Boolean) as string[];
+  let candidates = [process.env.GEMINI_MODEL, 'gemini-3.8-flash', 'gemini-2.0-flash'].filter(Boolean) as string[];
   const notes: string[] = [];
   let lastErr = 'unavailable';
   let detail = '';
@@ -116,8 +116,6 @@ export async function POST(req: Request) {
               temperature: 0.4,
               responseMimeType: 'application/json',
               maxOutputTokens: 1200,
-              // 2.5 models "think" first, which costs seconds: switch it off for quick answers.
-              ...(/2\.5-flash/.test(model) && !/lite/.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
             },
           }),
         },
