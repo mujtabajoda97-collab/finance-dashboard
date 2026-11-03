@@ -108,7 +108,7 @@ export function Assistant() {
         headers: { 'content-type': 'application/json', authorization: `Bearer ${token ?? ''}` },
         body: JSON.stringify({ prompt: q, context: await buildContext(), history, key: getGeminiKey() || undefined }),
       });
-      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; data?: { reply?: string; actions?: Action[] } };
+      const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; detail?: string; data?: { reply?: string; actions?: Action[] } };
       if (!j.ok) {
         const map: Record<string, string> = {
           'no-key': ar ? 'لم يُضبط مفتاح Gemini بعد. أضفه من الإعدادات ← المساعد الذكي، أو ضع GEMINI_API_KEY في متغيرات Vercel.' : 'No Gemini key yet. Add it in Settings → Smart assistant, or set GEMINI_API_KEY in Vercel.',
@@ -116,7 +116,7 @@ export function Assistant() {
           quota: ar ? 'تم تجاوز حصة Gemini حالياً. حاول لاحقاً.' : 'Gemini quota exceeded.',
           unauthorized: ar ? 'انتهت الجلسة، سجّل الدخول من جديد.' : 'Session expired.',
         };
-        throw new Error(map[j.error ?? ''] ?? (ar ? 'تعذّر الوصول للمساعد الآن.' : 'Assistant unavailable.'));
+        throw new Error((map[j.error ?? ''] ?? (ar ? 'تعذّر الوصول للمساعد الآن.' : 'Assistant unavailable.')) + (j.detail ? `\n(${j.detail})` : !j.error ? `\n(HTTP ${r.status})` : ''));
       }
       const acts = Array.isArray(j.data?.actions) ? j.data!.actions!.filter((a) => a && ['expense', 'income', 'debt_payment'].includes(a.type) && Number(a.amount) > 0) : [];
       setMsgs((m) => [...m, { role: 'model', text: j.data?.reply ?? '…', actions: acts, done: {} }]);
