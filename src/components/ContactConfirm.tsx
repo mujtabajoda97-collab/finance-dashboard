@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Phone, Send, X } from 'lucide-react';
 import { useApp } from './Providers';
-import { ContactsFail, findContacts, type ContactHit } from '@/lib/contacts';
+import { ContactsFail, cleanName, findContacts, type ContactHit } from '@/lib/contacts';
 import { normalizePhone } from '@/lib/recipient';
 import { sendWhatsApp } from '@/lib/notify';
 
@@ -20,6 +20,7 @@ export function ContactConfirm({ req, onClose }: { req: ContactRequest; onClose:
   const [problem, setProblem] = useState<string>('');
   const [pick, setPick] = useState(0);
   const [denied, setDenied] = useState(false);
+  const [detail, setDetail] = useState('');
   const [other, setOther] = useState(false);
   const [manual, setManual] = useState('');
   const [text, setText] = useState(req.message ?? '');
@@ -33,7 +34,8 @@ export function ContactConfirm({ req, onClose }: { req: ContactRequest; onClose:
     setProblem('');
     setOther(false);
     setDenied(false);
-    findContacts(req.person)
+    setDetail('');
+    findContacts(cleanName(req.person))
       .then((h) => { if (live) { setHits(h); if (h.length === 0) { setOther(true); setProblem(ar ? `لم أجد «${req.person}» في جهات الاتصال. أدخل الرقم يدوياً.` : `“${req.person}” was not found in your contacts. Enter the number.`); } } })
       .catch((e) => {
         if (!live) return;
@@ -41,6 +43,7 @@ export function ContactConfirm({ req, onClose }: { req: ContactRequest; onClose:
         setOther(true);
         setDenied(e instanceof ContactsFail && e.code === 'denied');
         const code = e instanceof ContactsFail ? e.code : 'failed';
+        setDetail(e instanceof ContactsFail ? e.detail : '');
         setProblem(code === 'unsupported'
           ? (ar ? 'قراءة جهات الاتصال تعمل داخل تطبيق الأندرويد (بعد تثبيت آخر APK). أدخل الرقم يدوياً.' : 'Contacts work inside the Android app. Enter the number.')
           : code === 'denied'
@@ -92,7 +95,7 @@ export function ContactConfirm({ req, onClose }: { req: ContactRequest; onClose:
           <p className="flex items-center gap-2 text-sm text-muted dark:text-night-muted"><Loader2 className="size-4 animate-spin" aria-hidden /> {ar ? 'أبحث في جهات الاتصال…' : 'Searching contacts…'}</p>
         ) : (
           <>
-            {problem && <p className="text-xs text-amber-800 dark:text-amber-300">{problem}</p>}
+            {problem && <p className="text-xs text-amber-800 dark:text-amber-300">{problem}{detail && <span className="mt-1 block font-mono text-[10px] opacity-70" dir="ltr">{detail}</span>}</p>}
             {hits.length > 0 && !other && (
               <ul className="space-y-1.5">
                 {hits.map((h, i) => (
