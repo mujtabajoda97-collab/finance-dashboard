@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { cacheGet, cacheSet } from './cache';
 import { supabase } from './supabase';
 import { reservedByWallet } from './reserve';
-import type { AlertLog, Debt, FundReservation, PendingInflow, Profile, Project, ProjectCashflow, RatePoint } from './types';
+import type { AlertLog, Debt, FundReservation, PendingInflow, Profile, WaInbox, Project, ProjectCashflow, RatePoint } from './types';
 
 /** Debts, alert log, profile and 7-day rate history. Each part fails on its own without breaking the app. */
-export function useExtraData(enabled: boolean) {
+export function useExtraData(enabled: boolean, uid = '') {
   const [debts, setDebts] = useState<Debt[]>([]);
   const [alerts, setAlerts] = useState<AlertLog[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -24,7 +25,19 @@ export function useExtraData(enabled: boolean) {
   /** true once SQL 0010 (pending_inflows, receive_pending_inflow) is applied. */
   const [pendingReady, setPendingReady] = useState(false);
   const reserved = useMemo(() => reservedByWallet(reservations), [reservations]);
+  const [inbox, setInbox] = useState<WaInbox[]>([]);
   const [extraError, setExtraError] = useState<string | null>(null);
+  const synced = useRef(false);
+
+  useEffect(() => {
+    if (!uid) return;
+    const c = cacheGet<{ debts: Debt[]; projects: Project[]; cashflows: ProjectCashflow[]; profile: Profile | null }>(uid, 'extra');
+    if (!c || synced.current) return;
+    setDebts(c.debts ?? []);
+    setProjects(c.projects ?? []);
+    setCashflows(c.cashflows ?? []);
+    setProfile(c.profile ?? null);
+  }, [uid]);
 
   const loadDebts = useCallback(async () => {
     const base = 'id,person_name,type,currency,total_amount,paid_amount,due_date,status,notes,created_at';
@@ -42,6 +55,17 @@ export function useExtraData(enabled: boolean) {
     setDebts(
       rows.map((d) => ({ ...d, total_amount: Number(d.total_amount), paid_amount: Number(d.paid_amount) })) as unknown as Debt[],
     );
+  }, []);
+
+  /** Debtor replies from the WhatsApp webhook. The table exists only after SQL 0011: a missing table is just "no replies". */
+  const loadInbox = useCallback(async () => {
+    const { data, error } = await supabase()
+      .from('wa_inbox')
+      .select('id,debt_id,from_phone,body,category,summary,suggest_days,suggested_reply,handled,created_at')
+      .eq('handled', false)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    setInbox(error ? [] : ((data ?? []) as unknown as WaInbox[]));
   }, []);
 
   const loadProjects = useCallback(async () => {
@@ -142,14 +166,29 @@ export function useExtraData(enabled: boolean) {
   }, []);
 
   const loadExtra = useCallback(async () => {
-    const results = await Promise.allSettled([loadDebts(), loadAlerts(), loadProfile(), loadRateHistory(), loadProjects(), loadReservations(), loadPending()]);
+    const results = await Promise.allSettled([loadDebts(), loadAlerts(), loadProfile(), loadRateHistory(), loadProjects(), loadReservations(), loadPending(), loadInbox()]);
     const failed = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined;
-    setExtraError(failed ? String(failed.reason?.message ?? failed.reason) : null);
-  }, [loadDebts, loadAlerts, loadProfile, loadRateHistory, loadProjects, loadReservations, loadPending]);
+    if (!failed) synced.current = true;
+    setExtraError(failed && !synced.current && !(uid && cacheGet(uid, 'extra')) ? String(failed.reason?.message ?? failed.reason) : null);
+  }, [uid, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadProjects, loadReservations, loadPending, loadInbox]);
 
   useEffect(() => {
     if (enabled) loadExtra();
   }, [enabled, loadExtra]);
 
-  return { debts, alerts, profile, rateHistory, projects, cashflows, projectsReady, projectsV2, loadProjects, reservations, reservationsReady, reserved, loadReservations, pending, pendingReady, loadPending, extraError, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadExtra };
+  useEffect(() => {
+    if (uid && synced.current) {
+      // The Green API token stays out of the offline copy.
+      const safe = profile ? ({ ...profile, green_api_token_instance: null } as Profile) : null;
+      cacheSet(uid, 'extra', { debts, projects, cashflows, profile: safe });
+    }
+  }, [uid, debts, projects, cashflows, profile]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    window.addEventListener('online', loadExtra);
+    return () => window.removeEventListener('online', loadExtra);
+  }, [enabled, loadExtra]);
+
+  return { inbox, loadInbox, debts, alerts, profile, rateHistory, projects, cashflows, projectsReady, projectsV2, loadProjects, reservations, reservationsReady, reserved, loadReservations, pending, pendingReady, loadPending, extraError, loadDebts, loadAlerts, loadProfile, loadRateHistory, loadExtra };
 }

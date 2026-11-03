@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { cacheGet, cacheSet } from './cache';
 import { supabase } from './supabase';
 import { toRateMap } from './currency';
 import { fetchAllPages } from './paging';
@@ -26,7 +27,7 @@ function normalizeTxns(rows: unknown[] | null): Txn[] {
   }));
 }
 
-export function useDashboardData(enabled: boolean) {
+export function useDashboardData(enabled: boolean, uid = '') {
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [allWallets, setAllWallets] = useState<Wallet[]>([]); // includes archived (names/balances for history)
   const [rateRows, setRateRows] = useState<ExchangeRate[]>([]);
@@ -36,6 +37,25 @@ export function useDashboardData(enabled: boolean) {
   const [monthTruncated, setMonthTruncated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasCache = useRef(false);
+  const synced = useRef(false);
+
+  // Show the last saved copy immediately; fresh data replaces it as soon as it arrives.
+  useEffect(() => {
+    if (!uid) return;
+    const c = cacheGet<{ allWallets: Wallet[]; rateRows: ExchangeRate[]; tasks: Task[]; monthTxns: Txn[]; recentTxns: Txn[] }>(uid, 'dash');
+    if (!c) return;
+    hasCache.current = true;
+    if (!synced.current) {
+      setAllWallets(c.allWallets ?? []);
+      setWallets((c.allWallets ?? []).filter((w) => !w.is_archived));
+      setRateRows(c.rateRows ?? []);
+      setTasks(c.tasks ?? []);
+      setMonthTxns(c.monthTxns ?? []);
+      setRecentTxns(c.recentTxns ?? []);
+      setLoading(false);
+    }
+  }, [uid]);
 
   const loadWallets = useCallback(async () => {
     const { data, error } = await supabase().from('wallets').select('*').order('created_at');
@@ -107,8 +127,10 @@ export function useDashboardData(enabled: boolean) {
     setError(null);
     try {
       await Promise.all([loadWallets(), loadRates(), loadTasks(), loadTxns()]);
+      synced.current = true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // Offline with a saved copy: keep showing it instead of an error screen.
+      if (!hasCache.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -116,6 +138,18 @@ export function useDashboardData(enabled: boolean) {
 
   useEffect(() => {
     if (enabled) loadAll();
+  }, [enabled, loadAll]);
+
+  // Save the last good copy (only after a real sync, so a stale cache never overwrites newer data).
+  useEffect(() => {
+    if (uid && synced.current && !loading) cacheSet(uid, 'dash', { allWallets, rateRows, tasks, monthTxns, recentTxns });
+  }, [uid, loading, allWallets, rateRows, tasks, monthTxns, recentTxns]);
+
+  // Back online: sync automatically.
+  useEffect(() => {
+    if (!enabled) return;
+    window.addEventListener('online', loadAll);
+    return () => window.removeEventListener('online', loadAll);
   }, [enabled, loadAll]);
 
   // Refresh when the installed app returns to the foreground.

@@ -38,6 +38,10 @@ jobs:
       - name: Install biometric plugin (optional)
         run: npm install --save --no-audit --no-fund @capgo/capacitor-native-biometric@6 || echo "biometric plugin not installed; continuing without it"
 
+      # File + share sheet for PDF statements (WhatsApp share). Optional: without them the PDF falls back to a normal download.
+      - name: Install file/share plugins (optional)
+        run: npm install --save --no-audit --no-fund @capacitor/filesystem@6 @capacitor/share@6 || echo "file/share plugins not installed; continuing without them"
+
       - name: Create the Android project (first run only)
         run: |
           if [ ! -d android ]; then

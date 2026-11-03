@@ -124,6 +124,9 @@ export default function TasksPage() {
                 </button>
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold">{task.title}</p>
+                  {task.description?.trim() && (
+                    <p className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-black/[0.04] px-2.5 py-1.5 text-xs leading-relaxed text-muted dark:bg-white/[0.06] dark:text-night-muted">{task.description}</p>
+                  )}
                   {d && (
                     <p className={`num mt-0.5 text-xs ${lateTask ? 'font-semibold text-rose-700 dark:text-rose-300' : 'text-muted dark:text-night-muted'}`}>
                       {isSameDubaiDay(d) ? T('fToday') : dateFmt.format(d)} · {timeFmt.format(d)}
@@ -186,6 +189,7 @@ function AddTask({ onDone }: { onDone: () => Promise<void> }) {
   const [alertErr, setAlertErr] = useState(false);
   const [alarm, setAlarm] = useState(false);
   const [rec, setRec] = useState<Recipient>(emptyRecipient);
+  const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const suggested = suggestedText('task', lang, { name: rec.name, title });
 
@@ -202,7 +206,7 @@ function AddTask({ onDone }: { onDone: () => Promise<void> }) {
     setBusy(true);
     const { data: created, error } = await supabase()
       .from('tasks')
-      .insert({ title: title.trim(), priority, period_type: period, due_date: dueIso, remind_before_minutes: minutes })
+      .insert({ title: title.trim(), priority, period_type: period, due_date: dueIso, remind_before_minutes: minutes, description: notes.trim() || null })
       .select('id')
       .single();
     if (error) { setBusy(false); return notify(error.message, 'error'); }
@@ -217,6 +221,10 @@ function AddTask({ onDone }: { onDone: () => Promise<void> }) {
       <label className="block">
         <span className="label">{T('taskTitle')}</span>
         <input autoFocus className="field" value={title} onChange={(e) => setTitle(e.target.value)} />
+      </label>
+      <label className="block">
+        <span className="label">{p2(lang, 'taskNotes')}</span>
+        <textarea className="field min-h-20 leading-relaxed" rows={3} maxLength={2000} placeholder={p2(lang, 'taskNotesPh')} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
       <label className="block">
         <span className="label">{T('date')} / {T('time')}</span>
@@ -254,18 +262,27 @@ function EditAlert({ task, onDone }: { task: Task; onDone: () => Promise<void> }
   const [alarm, setAlarm] = useState(!!task.alarm_enabled);
   const [rec, setRec] = useState<Recipient>(() => getRecipient('task', task.id));
   const [err, setErr] = useState(false);
+  const [notes, setNotes] = useState(task.description ?? '');
   const [busy, setBusy] = useState(false);
 
   const suggested = suggestedText('task', lang, { name: rec.name, title: task.title });
 
   async function save() {
-    if (!due || busy) return;
+    if (busy) return;
+    if (!due) {
+      setBusy(true);
+      const { error: e0 } = await supabase().from('tasks').update({ description: notes.trim() || null }).eq('id', task.id);
+      setBusy(false);
+      if (e0) return notify(e0.message, 'error');
+      notify(T('alertSaved'));
+      return onDone();
+    }
     const recErr = recipientError(rec);
     if (recErr) return notify(p2(lang, recErr), 'error');
     const minutes = minutesFromChoice(choice, due);
     if (minutes === null) { setErr(true); return; }
     setBusy(true);
-    const { error } = await supabase().from('tasks').update({ remind_before_minutes: minutes }).eq('id', task.id);
+    const { error } = await supabase().from('tasks').update({ remind_before_minutes: minutes, description: notes.trim() || null }).eq('id', task.id);
     if (error) { setBusy(false); return notify(error.message, 'error'); }
     if (alarm !== !!task.alarm_enabled && !(await setAlarmFlag('tasks', task.id, alarm))) notify(px(lang, 'alarmSaveFail'), 'error');
     setRecipient('task', task.id, rec);
@@ -277,11 +294,15 @@ function EditAlert({ task, onDone }: { task: Task; onDone: () => Promise<void> }
   return (
     <div className="space-y-4">
       <p className="font-semibold">{task.title}</p>
+      <label className="block">
+        <span className="label">{p2(lang, 'taskNotes')}</span>
+        <textarea className="field min-h-20 leading-relaxed" rows={3} maxLength={2000} placeholder={p2(lang, 'taskNotesPh')} value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </label>
       {!due && <p className="text-sm text-amber-800 dark:text-amber-300">{T('alertNeedsDue')}</p>}
       <AlertPicker value={choice} onChange={(v) => { setChoice(v); setErr(false); }} disabled={!due} error={err} />
       <RecipientField value={rec} onChange={setRec} suggested={suggested} disabled={!due} />
       <AlarmToggle on={alarm} onChange={setAlarm} disabled={!due} note={px(lang, 'alarmAtNote')} />
-      <button type="button" onClick={save} disabled={!due || busy} className="btn btn-primary w-full py-3">
+      <button type="button" onClick={save} disabled={busy} className="btn btn-primary w-full py-3">
         {busy && <Loader2 className="size-4 animate-spin" aria-hidden />} {T('save')}
       </button>
     </div>

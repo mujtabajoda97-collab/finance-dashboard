@@ -6,6 +6,8 @@ import { Loader2 } from 'lucide-react';
 import { useApp } from '@/components/Providers';
 import { AppShell } from '@/components/AppShell';
 import { AppLock } from '@/components/AppLock';
+import { InboxWatcher } from '@/components/InboxWatcher';
+import { Assistant } from '@/components/Assistant';
 import { SetupNotice } from '@/components/SetupNotice';
 import { DataProvider } from '@/lib/data';
 import { isSupabaseConfigured } from '@/lib/supabase';
@@ -35,6 +37,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <DataProvider session={session}>
       <AppLock>
         <AppShell email={session.user.email ?? ''}>{children}</AppShell>
+        <Assistant />
+        <InboxWatcher />
       </AppLock>
     </DataProvider>
   );

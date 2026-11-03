@@ -11,6 +11,8 @@ import { todayDubai } from '@/lib/derived';
 import { flowPaid, flowRest, summarize } from '@/lib/projects';
 import { px as tx, type AnyKey } from '@/lib/ptext';
 import type { Project, ProjectCashflow } from '@/lib/types';
+import { PdfButton } from '../PdfButton';
+import type { PdfDoc } from '@/lib/pdf';
 import { FlowSheet, PaySheet, ProjectSheet } from './ProjectForms';
 
 type K = AnyKey;
@@ -41,6 +43,31 @@ export function ProjectsPanel() {
     await loadProjects();
   }
 
+  const buildDoc = (): PdfDoc => {
+    const ar = lang === 'ar';
+    const head = ar ? ['البند', 'النوع', 'المبلغ', 'المنجز', 'المتبقي'] : ['Item', 'Type', 'Amount', 'Done', 'Remaining'];
+    return {
+      title: ar ? 'كشف المشاريع' : 'Projects statement',
+      subtitle: today,
+      sections: projects.map((p) => {
+        const s = summarize(p, cashflows, rates, today);
+        return {
+          heading: p.name,
+          head,
+          rows: cashflows.filter((f) => f.project_id === p.id).map((f) => [
+            f.title,
+            f.direction === 'IN' ? (ar ? 'وارد' : 'In') : ar ? 'صرف' : 'Out',
+            formatMoney(f.amount, p.currency, lang),
+            formatMoney(flowPaid(f), p.currency, lang),
+            formatMoney(flowRest(f), p.currency, lang),
+          ]),
+          note: `${ar ? 'الميزانية' : 'Budget'}: ${formatMoney(p.budget, p.currency, lang)} · ${ar ? 'المصروف' : 'Spent'}: ${formatMoney(s.spent, p.currency, lang)} · ${s.net >= 0 ? (ar ? 'فائض' : 'Surplus') : ar ? 'عجز' : 'Deficit'}: ${formatMoney(Math.abs(s.net), p.currency, lang)}`,
+        };
+      }),
+      footer: 'My Life OS',
+    };
+  };
+
   if (!projectsReady) {
     return <div className="card text-center text-sm text-muted dark:text-night-muted">{T('projectsSqlMissing')}</div>;
   }
@@ -49,6 +76,7 @@ export function ProjectsPanel() {
     <section className="w-full min-w-0 max-w-full space-y-4">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-base font-bold">{T('myProjects')}</h2>
+        {projects.length > 0 && <PdfButton build={buildDoc} fileName="projects-statement.pdf" className="btn btn-ghost ms-auto" />}
         <button type="button" className="btn btn-primary" onClick={() => setSheet(null)}>
           <Plus className="size-4" aria-hidden /> {T('addProject')}
         </button>

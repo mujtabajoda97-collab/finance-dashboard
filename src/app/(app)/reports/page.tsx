@@ -13,6 +13,8 @@ import { tx } from '@/lib/text';
 import { SpendingBreakdown } from '@/components/reports/SpendingBreakdown';
 import { SafeBoundary } from '@/components/SafeBoundary';
 import type { Txn } from '@/lib/types';
+import { PdfButton } from '@/components/PdfButton';
+import type { PdfDoc } from '@/lib/pdf';
 
 type Period = 'weekly' | 'monthly' | 'yearly';
 const DAY = 86_400_000;
@@ -106,8 +108,27 @@ export default function ReportsPage() {
   const R = 70, C = 2 * Math.PI * R;
   let acc = 0;
 
+  const buildDoc = (): PdfDoc => ({
+    title: lang === 'ar' ? 'تقرير المصروفات' : 'Spending report',
+    subtitle: label,
+    sections: [
+      {
+        heading: lang === 'ar' ? 'ملخص الفترة (بالدرهم)' : 'Period summary (AED)',
+        head: lang === 'ar' ? ['البند', 'المبلغ'] : ['Item', 'Amount'],
+        rows: [
+          ...parts.map((p) => [p.label, formatMoney(p.v, 'AED', lang)]),
+          [lang === 'ar' ? 'الإجمالي' : 'Total', formatMoney(stats.total, 'AED', lang)],
+          [lang === 'ar' ? 'المتبقي في المحافظ' : 'Left in wallets', formatMoney(stats.left, 'AED', lang)],
+        ],
+        note: stats.partial ? T('partialNote') : undefined,
+      },
+    ],
+    footer: 'My Life OS',
+  });
+
   return (
     <div className="mx-auto max-w-2xl space-y-4 pb-6">
+      <div className="flex justify-end"><PdfButton build={buildDoc} fileName="report.pdf" /></div>
       <div className="flex gap-2" role="tablist" aria-label={T('reports')}>
         {(['yearly', 'monthly', 'weekly'] as Period[]).map((p) => (
           <button key={p} type="button" role="tab" aria-selected={period === p} onClick={() => { setPeriod(p); setOffset(0); }}

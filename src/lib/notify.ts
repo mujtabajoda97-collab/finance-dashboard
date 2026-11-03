@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { normalizePhone } from './recipient';
 
 export type PermissionState = NotificationPermission | 'unsupported';
 
@@ -33,7 +34,9 @@ export async function showLocalNotification(title: string, body: string, tag: st
 }
 
 /** Sends a WhatsApp message to the number saved in the signed-in user's profile, or to `to` when given (server route + Green API). */
-export async function sendWhatsApp(text: string, to?: string): Promise<{ ok: boolean; error?: string }> {
+export interface WaRef { kind: 'task' | 'debt'; ids: string[] }
+
+export async function sendWhatsApp(text: string, to?: string, ref?: WaRef): Promise<{ ok: boolean; error?: string }> {
   try {
     const { data } = await supabase().auth.getSession();
     const token = data.session?.access_token;
@@ -44,6 +47,7 @@ export async function sendWhatsApp(text: string, to?: string): Promise<{ ok: boo
       body: JSON.stringify(to ? { text, to } : { text }),
     });
     const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (res.ok && body.ok && ref && ref.ids.length > 0) void recordOutbox(data.session!.user.id, text, to, ref);
     return res.ok && body.ok ? { ok: true } : { ok: false, error: body.error ?? `http-${res.status}` };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'network' };
@@ -79,6 +83,25 @@ export function markFired(key: string): void {
     all[key] = now;
     for (const k of Object.keys(all)) if (now - all[k] > KEEP_MS) delete all[k];
     localStorage.setItem(FIRED, JSON.stringify(all));
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Remembers which task / debt a sent message was about, so a WhatsApp reply ("تم", a debtor's answer) can be matched
+ * by the webhook. Best effort: the table only exists after SQL 0011, and any failure is ignored.
+ */
+async function recordOutbox(uid: string, text: string, to: string | undefined, ref: WaRef): Promise<void> {
+  try {
+    const sb = supabase();
+    let phone = to ? normalizePhone(to) : null;
+    if (!phone) {
+      const { data } = await sb.from('profiles').select('whatsapp_phone').maybeSingle();
+      phone = data?.whatsapp_phone ? normalizePhone(String(data.whatsapp_phone)) : null;
+    }
+    if (!phone) return;
+    await sb.from('wa_outbox').insert({ user_id: uid, kind: ref.kind, ref_ids: ref.ids, chat_phone: phone, message: text.slice(0, 1000), is_own_number: !to });
   } catch {
     /* ignore */
   }

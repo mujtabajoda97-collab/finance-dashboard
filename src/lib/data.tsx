@@ -12,8 +12,8 @@ const DataContext = createContext<DataContextValue | null>(null);
 
 /** Loads wallets, rates, tasks and transactions once for every signed-in page. */
 export function DataProvider({ session, children }: { session: Session; children: React.ReactNode }) {
-  const data = useDashboardData(true);
-  const extra = useExtraData(true);
+  const data = useDashboardData(true, session.user.id);
+  const extra = useExtraData(true, session.user.id);
   return (
     <DataContext.Provider value={{ ...data, ...extra, userId: session.user.id, email: session.user.email ?? '' }}>
       {children}

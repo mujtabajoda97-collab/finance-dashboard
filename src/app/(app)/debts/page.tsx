@@ -7,6 +7,7 @@ import { Sheet } from '@/components/Sheet';
 import { PaymentForm } from '@/components/debts/PaymentForm';
 import { DebtForm } from '@/components/debts/DebtForm';
 import { IncreaseForm } from '@/components/debts/IncreaseForm';
+import { DebtReplies } from '@/components/debts/DebtReplies';
 import { DebtHistory } from '@/components/debts/DebtHistory';
 import { SafeBoundary } from '@/components/SafeBoundary';
 import { AlarmToggle } from '@/components/AlarmToggle';
@@ -22,6 +23,8 @@ import { remaining } from '@/lib/debt';
 import { isDebtOverdue, isOpenDebt, liveAlerts } from '@/lib/derived';
 import { APP_TZ, intlLocale } from '@/lib/time';
 import { tx } from '@/lib/text';
+import { PdfButton } from '@/components/PdfButton';
+import type { PdfDoc } from '@/lib/pdf';
 import type { Debt, DebtType } from '@/lib/types';
 
 export default function DebtsPage() {
@@ -69,8 +72,32 @@ export default function DebtsPage() {
     );
   };
 
+  const buildDoc = (): PdfDoc => {
+    const loc = intlLocale(lang);
+    const dfmt = new Intl.DateTimeFormat(loc, { timeZone: APP_TZ, dateStyle: 'medium' });
+    const mk = (type: DebtType) =>
+      data.debts.filter((d) => d.type === type).map((d) => [
+        d.person_name,
+        formatMoney(d.total_amount, d.currency, lang),
+        formatMoney(d.paid_amount, d.currency, lang),
+        formatMoney(remaining(d.total_amount, d.paid_amount), d.currency, lang),
+        d.due_date ? dfmt.format(new Date(d.due_date)) : '—',
+      ]);
+    const head = lang === 'ar' ? ['الاسم', 'الإجمالي', 'المسدّد', 'المتبقي', 'الاستحقاق'] : ['Name', 'Total', 'Paid', 'Remaining', 'Due'];
+    return {
+      title: lang === 'ar' ? 'كشف الديون' : 'Debts statement',
+      subtitle: dfmt.format(new Date()),
+      sections: [
+        { heading: T('owedToYou'), head, rows: mk('RECEIVABLE') },
+        { heading: T('youOwe'), head, rows: mk('PAYABLE') },
+      ],
+      footer: 'My Life OS',
+    };
+  };
+
   return (
     <div className="mx-auto max-w-2xl space-y-5 pb-16">
+      <div className="flex justify-end"><PdfButton build={buildDoc} fileName="debts-statement.pdf" /></div>
       <div className="grid grid-cols-2 gap-3">
         {summary(T('owedToYou'), owed, 'from-emerald-500/30 to-emerald-900/10 border-emerald-400/40 text-emerald-700 dark:text-emerald-100', 'bg-emerald-300')}
         {summary(T('youOwe'), owe, 'from-rose-500/30 to-rose-900/10 border-rose-400/40 text-rose-700 dark:text-rose-100', 'bg-rose-300')}
@@ -93,6 +120,7 @@ export default function DebtsPage() {
                     <p className="truncate font-semibold">{d.person_name} <span className="text-xs font-normal text-muted dark:text-night-muted">({d.type === 'RECEIVABLE' ? T('receivableShort') : T('payableShort')})</span></p>
                     <p className={`num font-mono text-lg font-bold ${d.type === 'RECEIVABLE' ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-700 dark:text-rose-300'}`}>{formatMoney(d.status === 'PAID' ? d.total_amount : left, d.currency, lang)}</p>
                   </div>
+                  {data.inbox.some((m) => m.debt_id === d.id) && <span className="size-2.5 shrink-0 rounded-full bg-sky-500" aria-label="reply" />}
                   <span className={`inline-flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold ${chip.cls}`}>{chip.text}{chip.icon}</span>
                 </button>
                 {isOpen && (
@@ -103,6 +131,7 @@ export default function DebtsPage() {
                       {d.due_date && <span className="text-muted dark:text-night-muted">{T('dueDate')}: {d.due_date}</span>}
                     </div>
                     {d.notes && <p className="text-xs text-muted dark:text-night-muted">{d.notes}</p>}
+                    <DebtReplies debt={d} />
                     {isOpenDebt(d) && d.due_date && <DebtAlert debt={d} />}
                     {isOpenDebt(d) && (
                       <div className="grid grid-cols-2 gap-2">

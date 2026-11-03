@@ -168,3 +168,17 @@ export interface PendingInflow {
   project_id: string | null;
   created_at: string;
 }
+
+/** A debtor's WhatsApp reply analysed by the webhook (SQL 0011). */
+export interface WaInbox {
+  id: string;
+  debt_id: string | null;
+  from_phone: string;
+  body: string;
+  category: 'EXTENSION' | 'POSTPONE' | 'APOLOGY' | 'PAID_CLAIM' | 'OTHER';
+  summary: string | null;
+  suggest_days: number | null;
+  suggested_reply: string | null;
+  handled: boolean;
+  created_at: string;
+}
