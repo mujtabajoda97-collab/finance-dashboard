@@ -66,8 +66,22 @@ export async function POST(req: Request) {
     { role: 'user', parts: [{ text: classify ? prompt : `CONTEXT:\n${context}\n\nطلب المستخدم:\n${prompt}` }] },
   ];
 
-  const gem = async (path: string, init?: RequestInit) =>
-    fetch(`https://generativelanguage.googleapis.com/v1beta/${path}`, { ...init, headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey }, cache: 'no-store' });
+  const started = Date.now();
+  const left = () => 24_000 - (Date.now() - started);
+  const gem = async (path: string, init: RequestInit | undefined, ms: number) => {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), ms);
+    try {
+      return await fetch(`https://generativelanguage.googleapis.com/v1beta/${path}`, {
+        ...init,
+        signal: ctl.signal,
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
+        cache: 'no-store',
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   const errOf = async (r: Response) => {
     try {
       const j = (await r.json()) as { error?: { message?: string; status?: string } };
@@ -77,55 +91,76 @@ export async function POST(req: Request) {
     }
   };
 
-  // Models the key can really use (Google retires models often): configured ones first, then whatever "flash" the key lists.
-  const candidates = [process.env.GEMINI_MODEL, 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest'].filter(Boolean) as string[];
-  try {
-    const lr = await gem('models?pageSize=100');
-    if (lr.ok) {
-      const lj = (await lr.json()) as { models?: { name: string; supportedGenerationMethods?: string[] }[] };
-      const listed = (lj.models ?? [])
-        .filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent') && /flash/.test(m.name) && !/(image|tts|live|audio|thinking|exp|preview)/.test(m.name))
-        .map((m) => m.name.replace(/^models\//, ''));
-      for (const m of listed) if (!candidates.includes(m)) candidates.push(m);
-    } else if (lr.status === 400 || lr.status === 401 || lr.status === 403) {
-      return NextResponse.json({ ok: false, error: 'key-rejected', detail: await errOf(lr) }, { status: 400 });
-    }
-  } catch {
-    /* fall back to the fixed list */
-  }
-
+  // Fast path: go straight to a known fast model (no discovery round-trip). Only when every one of them is
+  // unavailable (404) is the key's own model list asked for, within the remaining time budget.
+  const tried = new Set<string>();
+  let candidates = [process.env.GEMINI_MODEL, 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash'].filter(Boolean) as string[];
   let lastErr = 'unavailable';
   let detail = '';
-  for (const model of candidates.slice(0, 6)) {
+  let discovered = false;
+
+  while (candidates.length > 0 && left() > 2_000) {
+    const model = candidates.shift() as string;
+    if (tried.has(model)) continue;
+    tried.add(model);
     try {
-      const r = await gem(`models/${model}:generateContent`, {
-        method: 'POST',
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: classify ? CLASSIFY : SYSTEM }] },
-          contents,
-          generationConfig: { temperature: 0.4, responseMimeType: 'application/json', maxOutputTokens: 1500 },
-        }),
-      });
+      const r = await gem(
+        `models/${model}:generateContent`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: classify ? CLASSIFY : SYSTEM }] },
+            contents,
+            generationConfig: {
+              temperature: 0.4,
+              responseMimeType: 'application/json',
+              maxOutputTokens: 1200,
+              // 2.5 models "think" first, which costs seconds: switch it off for quick answers.
+              ...(/2\.5-flash/.test(model) && !/lite/.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+            },
+          }),
+        },
+        Math.min(12_000, left()),
+      );
       if (r.status === 429) return NextResponse.json({ ok: false, error: 'quota', detail: await errOf(r) }, { status: 429 });
       if (!r.ok) {
         detail = `${model} → ${await errOf(r)}`;
         if (/API_KEY|API key not valid|PERMISSION_DENIED/i.test(detail)) return NextResponse.json({ ok: false, error: 'key-rejected', detail }, { status: 400 });
         lastErr = `gemini-${r.status}`;
-        continue;
+      } else {
+        const j = (await r.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[]; promptFeedback?: { blockReason?: string } };
+        const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+        if (text) {
+          let parsed: unknown = null;
+          try {
+            parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+          } catch {
+            parsed = classify ? null : { reply: text, actions: [] };
+          }
+          return NextResponse.json({ ok: true, model, data: parsed });
+        }
+        detail = `${model} → empty (${j.promptFeedback?.blockReason ?? 'no text'})`;
+        lastErr = 'empty';
       }
-      const j = (await r.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[]; promptFeedback?: { blockReason?: string } };
-      const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
-      if (!text) { detail = `${model} → empty (${j.promptFeedback?.blockReason ?? 'no text'})`; lastErr = 'empty'; continue; }
-      let parsed: unknown = null;
-      try {
-        parsed = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''));
-      } catch {
-        parsed = classify ? null : { reply: text, actions: [] };
-      }
-      return NextResponse.json({ ok: true, model, data: parsed });
     } catch (e) {
-      lastErr = 'network';
-      detail = `${model} → ${(e as Error).message}`.slice(0, 200);
+      lastErr = (e as Error).name === 'AbortError' ? 'timeout' : 'network';
+      detail = `${model} → ${lastErr}`;
+    }
+    if (candidates.length === 0 && !discovered && lastErr.startsWith('gemini-4') && left() > 5_000) {
+      discovered = true;
+      try {
+        const lr = await gem('models?pageSize=100', undefined, 4_000);
+        if (lr.ok) {
+          const lj = (await lr.json()) as { models?: { name: string; supportedGenerationMethods?: string[] }[] };
+          candidates = (lj.models ?? [])
+            .filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent') && /flash/.test(m.name) && !/(image|tts|live|audio|thinking|exp|preview)/.test(m.name))
+            .map((m) => m.name.replace(/^models\//, ''))
+            .filter((m) => !tried.has(m))
+            .slice(0, 2);
+        }
+      } catch {
+        /* keep the last error */
+      }
     }
   }
   return NextResponse.json({ ok: false, error: lastErr, detail }, { status: 502 });
