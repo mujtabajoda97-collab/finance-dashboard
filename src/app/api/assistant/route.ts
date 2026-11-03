@@ -52,8 +52,10 @@ export async function POST(req: Request) {
   }
   const prompt = typeof body.prompt === 'string' ? body.prompt.trim().slice(0, MAX_PROMPT) : '';
   if (!prompt) return NextResponse.json({ ok: false, error: 'empty' }, { status: 400 });
-  const own = typeof body.key === 'string' ? body.key.trim() : '';
-  const apiKey = /^[A-Za-z0-9_-]{20,80}$/.test(own) ? own : process.env.GEMINI_API_KEY ?? '';
+  // The key typed in the app wins over the server variable. Pasted keys often carry spaces, quotes or line breaks.
+  const clean = (v: unknown) => (typeof v === 'string' ? v.replace(/["'\s]/g, '') : '');
+  const own = clean(body.key);
+  const apiKey = /^[\x21-\x7e]{20,200}$/.test(own) ? own : clean(process.env.GEMINI_API_KEY);
   if (!apiKey) return NextResponse.json({ ok: false, error: 'no-key' }, { status: 400 });
 
   const classify = body.mode === 'classify';
