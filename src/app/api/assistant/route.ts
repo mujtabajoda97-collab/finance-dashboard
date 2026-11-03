@@ -94,7 +94,8 @@ export async function POST(req: Request) {
   // Fast path: go straight to a known fast model (no discovery round-trip). Only when every one of them is
   // unavailable (404) is the key's own model list asked for, within the remaining time budget.
   const tried = new Set<string>();
-  let candidates = [process.env.GEMINI_MODEL, 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash'].filter(Boolean) as string[];
+  let candidates = [process.env.GEMINI_MODEL, 'gemini-2.5-flash', 'gemini-flash-latest'].filter(Boolean) as string[];
+  const notes: string[] = [];
   let lastErr = 'unavailable';
   let detail = '';
   let discovered = false;
@@ -125,6 +126,7 @@ export async function POST(req: Request) {
       if (r.status === 429) return NextResponse.json({ ok: false, error: 'quota', detail: await errOf(r) }, { status: 429 });
       if (!r.ok) {
         detail = `${model} → ${await errOf(r)}`;
+        notes.push(detail);
         if (/API_KEY|API key not valid|PERMISSION_DENIED/i.test(detail)) return NextResponse.json({ ok: false, error: 'key-rejected', detail }, { status: 400 });
         lastErr = `gemini-${r.status}`;
       } else {
@@ -140,11 +142,13 @@ export async function POST(req: Request) {
           return NextResponse.json({ ok: true, model, data: parsed });
         }
         detail = `${model} → empty (${j.promptFeedback?.blockReason ?? 'no text'})`;
+        notes.push(detail);
         lastErr = 'empty';
       }
     } catch (e) {
       lastErr = (e as Error).name === 'AbortError' ? 'timeout' : 'network';
       detail = `${model} → ${lastErr}`;
+      notes.push(detail);
     }
     if (candidates.length === 0 && !discovered && lastErr.startsWith('gemini-4') && left() > 5_000) {
       discovered = true;
@@ -152,16 +156,19 @@ export async function POST(req: Request) {
         const lr = await gem('models?pageSize=100', undefined, 4_000);
         if (lr.ok) {
           const lj = (await lr.json()) as { models?: { name: string; supportedGenerationMethods?: string[] }[] };
+          // Newest full "flash" models first; "lite" / older families are excluded (often closed to new accounts).
+          const ver = (n: string) => Number((/gemini-(\d+(?:\.\d+)?)/.exec(n) ?? [])[1] ?? 0);
           candidates = (lj.models ?? [])
-            .filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent') && /flash/.test(m.name) && !/(image|tts|live|audio|thinking|exp|preview)/.test(m.name))
+            .filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent') && /flash/.test(m.name) && !/(lite|8b|image|tts|live|audio|thinking|exp|preview)/.test(m.name))
             .map((m) => m.name.replace(/^models\//, ''))
             .filter((m) => !tried.has(m))
-            .slice(0, 2);
+            .sort((a, b) => ver(b) - ver(a))
+            .slice(0, 3);
         }
       } catch {
         /* keep the last error */
       }
     }
   }
-  return NextResponse.json({ ok: false, error: lastErr, detail }, { status: 502 });
+  return NextResponse.json({ ok: false, error: lastErr, detail: (notes.length ? notes : [detail]).join(' | ').slice(0, 600) }, { status: 502 });
 }
