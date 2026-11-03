@@ -45,7 +45,11 @@ jobs:
       # Voice for the assistant: Android WebView has no Web Speech recognition, so native speech-to-text and
       # text-to-speech plugins are used. Optional: without them the mic/speaker buttons explain they are unavailable.
       - name: Install voice plugins (optional)
-        run: npm install --save --no-audit --no-fund @capacitor-community/speech-recognition@6 @capacitor-community/text-to-speech@6 || echo "voice plugins not installed; continuing without them"
+        run: |
+          # Installed one by one with --legacy-peer-deps: a peer-range clash on one plugin must not drop the other.
+          npm install --save --legacy-peer-deps --no-audit --no-fund @capacitor-community/speech-recognition@6 || echo "speech-recognition plugin NOT installed"
+          npm install --save --legacy-peer-deps --no-audit --no-fund @capacitor-community/text-to-speech@5 || npm install --save --legacy-peer-deps --no-audit --no-fund @capacitor-community/text-to-speech@6 || echo "text-to-speech plugin NOT installed"
+          npm ls @capacitor-community/speech-recognition @capacitor-community/text-to-speech --legacy-peer-deps || true
 
       - name: Create the Android project (first run only)
         run: |
