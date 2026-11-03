@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Mic, Send, Sparkles, X } from 'lucide-react';
+import { Loader2, Mic, Send, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
 import { useApp } from './Providers';
 import { useData } from '@/lib/data';
 import { supabase } from '@/lib/supabase';
@@ -13,6 +13,7 @@ import { remaining, validatePayment } from '@/lib/debt';
 import { summarize } from '@/lib/projects';
 import { buildTxnRow } from '@/lib/finance';
 import { newRequestId } from '@/lib/flags';
+import { VoiceFail, getAutoSpeak, listenOnce, setAutoSpeak, speak, stopListening, stopSpeaking } from '@/lib/voice';
 import { getAiKey, getAiModel, getProvider } from '@/lib/assistantKey';
 import type { Currency, Debt, Wallet } from '@/lib/types';
 
@@ -26,7 +27,6 @@ const CHIPS = [
   { ar: 'رسالة مطالبة ودّية', en: 'Friendly collection note', q: 'اكتب رسالة واتساب ودّية ولبقة لتذكير أكثر مدين تأخراً بدينه.' },
 ];
 
-type SR = { lang: string; interimResults: boolean; start(): void; stop(): void; onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onend: (() => void) | null; onerror: (() => void) | null };
 
 export function Assistant() {
   const { lang, notify } = useApp();
@@ -38,9 +38,11 @@ export function Assistant() {
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
   const prev = useRef<Record<string, number> | null>(null);
-  const rec = useRef<SR | null>(null);
+  const [auto, setAuto] = useState(false);
+  const [speaking, setSpeaking] = useState<number | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
-  const voiceOk = typeof window !== 'undefined' && !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  useEffect(() => { setAuto(getAutoSpeak()); }, []);
+  useEffect(() => { if (!open) { stopSpeaking(); stopListening(); setSpeaking(null); } }, [open]);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }); }, [msgs, busy, open]);
 
@@ -121,7 +123,9 @@ export function Assistant() {
         throw new Error((map[j.error ?? ''] ?? (ar ? 'تعذّر الوصول للمساعد الآن.' : 'Assistant unavailable.')) + (j.detail ? `\n(${j.detail})` : !j.error ? `\n(HTTP ${r.status})` : ''));
       }
       const acts = Array.isArray(j.data?.actions) ? j.data!.actions!.filter((a) => a && ['expense', 'income', 'debt_payment'].includes(a.type) && Number(a.amount) > 0) : [];
-      setMsgs((m) => [...m, { role: 'model', text: j.data?.reply ?? '…', actions: acts, done: {} }]);
+      const reply = j.data?.reply ?? '…';
+      setMsgs((m) => [...m, { role: 'model', text: reply, actions: acts, done: {} }]);
+      if (getAutoSpeak()) void speak(reply, ar ? 'ar' : 'en').catch(() => undefined);
     } catch (e) {
       setMsgs((m) => [...m, { role: 'model', text: (e as Error).message }]);
     } finally {
@@ -129,19 +133,38 @@ export function Assistant() {
     }
   }
 
-  function toggleVoice() {
-    if (listening) { rec.current?.stop(); return; }
-    const Ctor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!Ctor) return notify(ar ? 'الإدخال الصوتي غير مدعوم على هذا الجهاز' : 'Voice input not supported here', 'error');
-    const r: SR = new Ctor();
-    r.lang = ar ? 'ar-AE' : 'en-US';
-    r.interimResults = false;
-    r.onresult = (e) => { const t = e.results[0]?.[0]?.transcript; if (t) setText((x) => (x ? `${x} ${t}` : t)); };
-    r.onend = () => setListening(false);
-    r.onerror = () => { setListening(false); notify(ar ? 'تعذّر الاستماع (تحقق من إذن الميكروفون)' : 'Could not listen', 'error'); };
-    rec.current = r;
+  async function toggleVoice() {
+    if (listening) { stopListening(); return; }
+    stopSpeaking();
+    setSpeaking(null);
     setListening(true);
-    try { r.start(); } catch { setListening(false); }
+    try {
+      const heard = await listenOnce(ar ? 'ar' : 'en');
+      setListening(false);
+      await ask(heard);
+    } catch (e) {
+      setListening(false);
+      const code = e instanceof VoiceFail ? e.code : 'failed';
+      const t: Record<string, [string, string]> = {
+        unsupported: ['الإدخال الصوتي غير مدعوم هنا. حدّث التطبيق (APK الجديد) أو اكتب أمرك.', 'Voice input is not supported here. Update the app or type.'],
+        denied: ['لم يُمنح إذن الميكروفون. فعّله من إعدادات الهاتف ← التطبيقات ← الأذونات.', 'Microphone permission was not granted. Enable it in the phone settings.'],
+        'no-speech': ['لم أسمع شيئاً، حاول مرة أخرى.', 'I did not hear anything, try again.'],
+        failed: ['تعذّر التعرف على الصوت، حاول مرة أخرى.', 'Speech recognition failed, try again.'],
+      };
+      notify(t[code][ar ? 0 : 1], 'error');
+    }
+  }
+
+  async function readAloud(i: number, text: string) {
+    if (speaking === i) { stopSpeaking(); setSpeaking(null); return; }
+    setSpeaking(i);
+    try {
+      await speak(text, ar ? 'ar' : 'en');
+    } catch {
+      notify(ar ? 'القراءة الصوتية غير متاحة. ثبّت صوتاً عربياً من إعدادات الهاتف ← تحويل النص إلى كلام.' : 'Text-to-speech is unavailable on this device.', 'error');
+    } finally {
+      setSpeaking((c) => (c === i ? null : c));
+    }
   }
 
   /** Executes a confirmed action with the same database calls the manual forms use. */
@@ -190,7 +213,13 @@ export function Assistant() {
         <div className="fixed inset-0 z-[60] flex flex-col bg-white dark:bg-night" role="dialog" aria-label={ar ? 'المساعد الذكي' : 'Smart assistant'}>
           <header className="flex items-center justify-between border-b border-line px-4 py-3 dark:border-night-line">
             <h2 className="flex items-center gap-2 text-base font-bold"><Sparkles className="size-5 text-brand-500" aria-hidden /> {ar ? 'المساعد الذكي' : 'Smart assistant'}</h2>
-            <button type="button" className="icon-btn" onClick={() => setOpen(false)} aria-label="×"><X className="size-5" aria-hidden /></button>
+            <div className="flex items-center gap-1">
+              <button type="button" className={`icon-btn ${auto ? '!bg-brand-500 !text-night' : ''}`} aria-pressed={auto} title={ar ? 'قراءة الردود تلقائياً' : 'Read replies aloud automatically'} aria-label={ar ? 'قراءة الردود تلقائياً' : 'Auto read replies'}
+                onClick={() => { const v = !auto; setAuto(v); setAutoSpeak(v); if (!v) { stopSpeaking(); setSpeaking(null); } }}>
+                {auto ? <Volume2 className="size-5" aria-hidden /> : <VolumeX className="size-5" aria-hidden />}
+              </button>
+              <button type="button" className="icon-btn" onClick={() => setOpen(false)} aria-label="×"><X className="size-5" aria-hidden /></button>
+            </div>
           </header>
           <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
             {msgs.length === 0 && (
@@ -207,8 +236,13 @@ export function Assistant() {
               <div key={mi} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
                 <div className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${m.role === 'user' ? 'bg-brand-500 text-night' : 'border border-line bg-card dark:border-night-line dark:bg-night-card'}`}>
                   {m.text}
-                  {m.role === 'model' && m.text.length > 20 && !m.actions?.length && (
-                    <button type="button" className="mt-2 block text-[11px] font-semibold text-brand-700 dark:text-brand-400" onClick={() => { void navigator.clipboard?.writeText(m.text); notify(ar ? 'تم النسخ' : 'Copied'); }}>{ar ? 'نسخ النص' : 'Copy'}</button>
+                  {m.role === 'model' && m.text.length > 20 && (
+                    <span className="mt-2 flex items-center gap-3">
+                      <button type="button" className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-700 dark:text-brand-400" aria-label={ar ? 'قراءة الرد' : 'Read aloud'} onClick={() => void readAloud(mi, m.text)}>
+                        {speaking === mi ? <VolumeX className="size-4" aria-hidden /> : <Volume2 className="size-4" aria-hidden />} {speaking === mi ? (ar ? 'إيقاف' : 'Stop') : ar ? 'استماع' : 'Listen'}
+                      </button>
+                      <button type="button" className="text-[11px] font-semibold text-brand-700 dark:text-brand-400" onClick={() => { void navigator.clipboard?.writeText(m.text); notify(ar ? 'تم النسخ' : 'Copied'); }}>{ar ? 'نسخ النص' : 'Copy'}</button>
+                    </span>
                   )}
                   {m.actions?.map((a, ai) => <ActionCard key={ai} a={a} wallets={data.wallets} done={m.done?.[ai]} ar={ar} onRun={(wid, amt) => run(mi, ai, a, wid, amt)} />)}
                 </div>
@@ -218,9 +252,7 @@ export function Assistant() {
             <div ref={endRef} />
           </div>
           <form className="flex items-center gap-2 border-t border-line p-3 dark:border-night-line" onSubmit={(e) => { e.preventDefault(); void ask(text); }}>
-            {voiceOk && (
-              <button type="button" onClick={toggleVoice} aria-label={ar ? 'إدخال صوتي' : 'Voice'} className={`icon-btn ${listening ? '!bg-rose-500 !text-white' : ''}`}><Mic className="size-5" aria-hidden /></button>
-            )}
+            <button type="button" onClick={() => void toggleVoice()} disabled={busy} aria-label={ar ? 'إدخال صوتي' : 'Voice'} aria-pressed={listening} className={`icon-btn ${listening ? '!bg-rose-500 !text-white animate-pulse' : ''}`}><Mic className="size-5" aria-hidden /></button>
             <input className="field flex-1" value={text} onChange={(e) => setText(e.target.value)} placeholder={ar ? 'اكتب أمرك أو سؤالك…' : 'Type a command or question…'} />
             <button type="submit" disabled={busy || !text.trim()} className="btn btn-primary" aria-label="send"><Send className="size-4 rtl:-scale-x-100" aria-hidden /></button>
           </form>

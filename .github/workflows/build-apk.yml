@@ -42,6 +42,11 @@ jobs:
       - name: Install file/share plugins (optional)
         run: npm install --save --no-audit --no-fund @capacitor/filesystem@6 @capacitor/share@6 || echo "file/share plugins not installed; continuing without them"
 
+      # Voice for the assistant: Android WebView has no Web Speech recognition, so native speech-to-text and
+      # text-to-speech plugins are used. Optional: without them the mic/speaker buttons explain they are unavailable.
+      - name: Install voice plugins (optional)
+        run: npm install --save --no-audit --no-fund @capacitor-community/speech-recognition@6 @capacitor-community/text-to-speech@6 || echo "voice plugins not installed; continuing without them"
+
       - name: Create the Android project (first run only)
         run: |
           if [ ! -d android ]; then
@@ -55,11 +60,15 @@ jobs:
           mkdir -p android/app/src/main/res/raw
           cp android-res/raw/alarm.wav android/app/src/main/res/raw/alarm.wav
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          for perm in POST_NOTIFICATIONS SCHEDULE_EXACT_ALARM USE_EXACT_ALARM VIBRATE WAKE_LOCK RECEIVE_BOOT_COMPLETED USE_BIOMETRIC USE_FINGERPRINT; do
+          for perm in POST_NOTIFICATIONS SCHEDULE_EXACT_ALARM USE_EXACT_ALARM VIBRATE WAKE_LOCK RECEIVE_BOOT_COMPLETED USE_BIOMETRIC USE_FINGERPRINT RECORD_AUDIO MODIFY_AUDIO_SETTINGS; do
             if ! grep -q "android.permission.$perm\"" "$MANIFEST"; then
               sed -i "s#</manifest>#    <uses-permission android:name=\"android.permission.$perm\" />\n</manifest>#" "$MANIFEST"
             fi
           done
+          # Android 11+ package visibility: the app must be allowed to see the speech recognizer and TTS engine.
+          if ! grep -q "android.speech.RecognitionService" "$MANIFEST"; then
+            sed -i "s#</manifest>#    <queries>\n        <intent><action android:name=\"android.speech.RecognitionService\" /></intent>\n        <intent><action android:name=\"android.intent.action.TTS_SERVICE\" /></intent>\n    </queries>\n</manifest>#" "$MANIFEST"
+          fi
           grep -n "uses-permission" "$MANIFEST"
           ls -la android/app/src/main/res/raw
 
