@@ -2,7 +2,7 @@ export type AiProvider = 'gemini' | 'openai' | 'anthropic';
 export const PROVIDERS: { id: AiProvider; label: string; model: string; hint: string }[] = [
   { id: 'gemini', label: 'Google Gemini', model: 'gemini-3.8-flash', hint: 'AIza…' },
   { id: 'openai', label: 'OpenAI', model: 'gpt-4o-mini', hint: 'sk-…' },
-  { id: 'anthropic', label: 'Anthropic Claude', model: 'claude-haiku-5-5', hint: 'sk-ant-…' },
+  { id: 'anthropic', label: 'Anthropic Claude', model: 'claude-3-5-haiku-20241022', hint: 'sk-ant-…' },
 ];
 
 /** Built-in model lists, newest / smartest first down to fastest / lightest. The user can also type any model name. */
@@ -25,10 +25,6 @@ export const ANTHROPIC_MODELS: ModelInfo[] = [
   { id: 'claude-3-5-sonnet-20241022', ar: 'Sonnet 3.5 (رسمي)', en: 'Sonnet 3.5' },
   { id: 'claude-3-5-haiku-20241022', ar: 'Haiku 3.5 (رسمي)', en: 'Haiku 3.5' },
   { id: 'claude-3-opus-20240229', ar: 'Opus 3 (رسمي)', en: 'Opus 3' },
-  { id: 'claude-fable-5-1', ar: 'الأقوى (حديث)', en: 'most capable' },
-  { id: 'claude-opus-5-5', ar: 'ذكاء عالٍ (حديث)', en: 'high intelligence' },
-  { id: 'claude-sonnet-5-5', ar: 'ذكي وسريع (حديث)', en: 'smart and fast' },
-  { id: 'claude-haiku-5-5', ar: 'الأسرع والأخف (حديث)', en: 'fastest' },
   { id: 'claude-opus-4-1-20250805', ar: 'Opus 4.1', en: 'Opus 4.1' },
   { id: 'claude-sonnet-4-20250514', ar: 'Sonnet 4', en: 'Sonnet 4' },
   { id: 'claude-3-7-sonnet-latest', ar: 'Sonnet 3.7', en: 'Sonnet 3.7' },
@@ -50,7 +46,11 @@ export const getProvider = (): AiProvider => {
 export const setProvider = (p: AiProvider): void => write(P, p);
 export const getAiKey = (p: AiProvider = getProvider()): string => strip(read(K(p)));
 export const setAiKey = (p: AiProvider, v: string): void => write(K(p), strip(v));
-export const getAiModel = (p: AiProvider = getProvider()): string => read(M(p)).trim();
+export const getAiModel = (p: AiProvider = getProvider()): string => {
+  const v = read(M(p)).trim();
+  // names saved by an earlier version of the app that Anthropic rejects: fall back to the default
+  return p === 'anthropic' && /^claude-(fable|opus|sonnet|haiku)-5-/.test(v) ? '' : v;
+};
 export const setAiModel = (p: AiProvider, v: string): void => write(M(p), v.trim());
 /** Backwards compatible names. */
 export const getGeminiKey = (): string => getAiKey('gemini');

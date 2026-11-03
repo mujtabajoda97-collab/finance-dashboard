@@ -47,7 +47,7 @@ const DEFAULT_MODEL: Record<Provider, string> = {
   // 2.5-flash is closed to new Google accounts; 3.8-flash is the model Google itself points new keys to.
   gemini: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
   openai: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-  anthropic: process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5',
+  anthropic: process.env.ANTHROPIC_MODEL || 'claude-3-5-haiku-20241022',
 };
 const ENV_KEY: Record<Provider, string | undefined> = {
   gemini: process.env.GEMINI_API_KEY,
@@ -117,8 +117,7 @@ async function callProvider(provider: Provider, key: string, model: string, syst
   }
   const r = await post('https://api.anthropic.com/v1/messages', { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, {
     model,
-    max_tokens: 1200,
-    temperature: 0.4,
+    max_tokens: 1000,
     system,
     messages: turns.map((t) => ({ role: t.role === 'model' ? 'assistant' : 'user', content: t.text })),
   });
